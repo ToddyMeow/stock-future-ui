@@ -1,36 +1,82 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# stock-future-ui
 
-## Getting Started
+中国期货半自动实盘交易系统前端。与后端 `stock-future/live/`（FastAPI REST）配套：前端负责指令回填、持仓展示、历史查询、报告查看；后端负责策略信号生成、持仓状态维护、报告产出。
 
-First, run the development server:
+## 技术栈
+
+- Next.js 16（App Router，Turbopack）
+- React 19
+- TypeScript 5
+- Tailwind CSS v4
+- shadcn/ui（base-nova preset，Slate 默认色板）
+- recharts + date-fns（图表与日期工具）
+- react-hook-form + zod（表单）
+
+## 启动
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install                      # 首次
+cp .env.local.example .env.local # 配置后端地址
+npm run dev                      # 开发，默认 http://localhost:3000
+npm run build                    # 产品构建
+npm run start                    # 本地预览 build 产物
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 环境变量
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | 后端 FastAPI 根地址 |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 目录结构
 
-## Learn More
+```
+stock-future-ui/
+├── app/
+│   ├── layout.tsx              # 根布局（含侧边栏）
+│   ├── globals.css             # Tailwind + shadcn css vars
+│   ├── page.tsx                # / 仪表盘
+│   ├── instructions/page.tsx   # /instructions 今日指令回填
+│   ├── positions/page.tsx      # /positions 当前持仓
+│   ├── history/page.tsx        # /history 历史查询
+│   ├── analytics/page.tsx      # /analytics 品种/策略分析
+│   └── reports/[date]/page.tsx # /reports/[date] 每日报告（动态）
+├── components/
+│   ├── sidebar.tsx             # 左侧导航（使用 usePathname 高亮）
+│   └── ui/                     # shadcn 组件（table / form / dialog / ...）
+├── lib/
+│   ├── api.ts                  # 后端 API 客户端（P2b 阶段实现）
+│   └── utils.ts                # shadcn cn() 等工具
+├── components.json             # shadcn 配置
+├── tsconfig.json
+├── next.config.ts
+├── postcss.config.mjs          # Tailwind v4 via @tailwindcss/postcss
+└── package.json
+```
 
-To learn more about Next.js, take a look at the following resources:
+## 路由清单
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| 路径 | 页面 | 用途 |
+| --- | --- | --- |
+| `/` | 仪表盘 | 累计 PnL / Sharpe / MaxDD / 胜率 / 今日 PnL / 待回填数 / 最近告警 |
+| `/instructions` | 今日指令 | 今日待回填指令列表 + 回填表单（量 / 价 / 否决 / skipped） |
+| `/positions` | 当前持仓 | 实时持仓表（品种 / 方向 / 开仓价 / 当前价 / 浮盈 / 止损止盈） |
+| `/history` | 历史查询 | 按日期 / 品种查询历史指令和成交 |
+| `/analytics` | 分析 | 品种与策略维度 breakdown + 资金曲线对比 |
+| `/reports/[date]` | 每日报告 | 指定日期详细报告；`/reports/today` 是入口别名 |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 开发阶段
 
-## Deploy on Vercel
+| 阶段 | 目标 |
+| --- | --- |
+| **P1 骨架** | 6 页空占位、侧边栏、shadcn 组件库、API 客户端壳（当前） |
+| **P2a** | 接入 `/api/dashboard` 等只读接口，recharts 画资金曲线 |
+| **P2b** | 打通 `/api/instructions` 回填、`/api/positions`、`/api/reports/{date}` |
+| **P3** | 告警、WebSocket 推送、鉴权 |
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 与后端约定
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- 后端路径：`/Users/mm/Trading/stock-future/live/`
+- 后端端口：默认 `8000`
+- 日期格式：`YYYY-MM-DD`（ISO），夜盘用 `session=night`
+- 所有时间戳统一用 `Asia/Shanghai` 时区
