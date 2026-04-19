@@ -1,11 +1,51 @@
-export default function HistoryPage() {
+/**
+ * app/history/page.tsx — 历史查询（RSC）
+ *
+ * 后端 /api/history?date=YYYY-MM-DD 一次只拿一天。
+ * 前端按单日查询（?date=YYYY-MM-DD searchParams）；
+ * mock 降级：合成多日视图仅在降级场景下可用。
+ */
+import { fetchHistory, fetchOrMock } from "@/lib/api"
+import { mockInstructions } from "@/lib/mock"
+import { MockBanner } from "@/components/mock-banner"
+import { HistoryView } from "./history-view.client"
+import type { Instruction } from "@/lib/types"
+
+function todayStr(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+type SearchParams = Promise<{ date?: string }>
+
+export default async function HistoryPage({
+  searchParams,
+}: {
+  searchParams: SearchParams
+}) {
+  const params = await searchParams
+  const date =
+    params.date && /^\d{4}-\d{2}-\d{2}$/.test(params.date)
+      ? params.date
+      : todayStr()
+
+  const result = await fetchOrMock(
+    async () => {
+      const res = await fetchHistory(date)
+      return res.instructions
+    },
+    // mock 降级：用 mockInstructions 改写 session_date 为查询日
+    (): Instruction[] =>
+      mockInstructions().map((r) => ({
+        ...r,
+        session_date: date,
+        id: `${r.id}-${date}`,
+      })),
+  )
+
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold">历史查询</h1>
-      <p className="text-muted-foreground mt-2">
-        按日期查询历史指令 / 成交 / 每日 PnL 占位。支持日期范围选择和品种过滤。
-        P2b 阶段接 /api/history。
-      </p>
-    </div>
+    <>
+      {result.isMock && <MockBanner reason={result.error} />}
+      <HistoryView instructions={result.data} date={date} />
+    </>
   )
 }

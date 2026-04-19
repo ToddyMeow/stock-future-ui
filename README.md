@@ -80,3 +80,26 @@ stock-future-ui/
 - 后端端口：默认 `8000`
 - 日期格式：`YYYY-MM-DD`（ISO），夜盘用 `session=night`
 - 所有时间戳统一用 `Asia/Shanghai` 时区
+
+## 推送到远端
+
+本地已初始化 remote `origin → https://github.com/ToddyMeow/stock-future-ui.git`，但**未执行 push**（受限于 gh 未登录）。
+
+首次推送（用户在本机手跑）：
+
+```bash
+cd /Users/mm/Trading/stock-future-ui
+
+# 登录 GitHub（选 HTTPS + web 浏览器 / token 方式都行）
+gh auth login
+
+# 推 main
+git push -u origin main
+```
+
+后续常规 push 直接 `git push` 即可。
+
+如果 remote 已指向别的 URL 需要改：
+```bash
+git remote set-url origin https://github.com/ToddyMeow/stock-future-ui.git
+```

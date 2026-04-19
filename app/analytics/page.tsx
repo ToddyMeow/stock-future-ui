@@ -1,11 +1,19 @@
-export default function AnalyticsPage() {
+/**
+ * app/analytics/page.tsx — 分析（RSC）
+ *
+ * 后端暂无归因聚合端点（/api/reports/{date} 只拿当日指令 + equity_series）。
+ * 当前整页走 mock；顶部 banner 说明原因，待后端 P1d 补齐后切真数据。
+ */
+import { mockAnalyticsBreakdown } from "@/lib/mock"
+import { MockBanner } from "@/components/mock-banner"
+import { AnalyticsView } from "./analytics-view.client"
+
+export default async function AnalyticsPage() {
+  const data = mockAnalyticsBreakdown()
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold">分析</h1>
-      <p className="text-muted-foreground mt-2">
-        品种 / 策略 breakdown 占位：按品种汇总的胜率、期望、Sharpe；按策略维度的资金曲线对比。
-        P2a 阶段用 recharts 接入。
-      </p>
-    </div>
+    <>
+      <MockBanner reason="后端归因聚合端点未就绪，暂用 mock" />
+      <AnalyticsView data={data} />
+    </>
   )
 }
