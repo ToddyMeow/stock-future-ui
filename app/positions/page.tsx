@@ -1,32 +1,25 @@
 /**
  * app/positions/page.tsx — 当前持仓（RSC）
  *
- * 拉 positions + daily_pnl（用最新一日拿账户权益）。
+ * 拉 positions + daily_pnl（用最新一日拿账户权益）+ rolls（Q6 换约候选）。
  * 字段 `unrealized_pnl` / `last_price` 若后端无值，前端回退 0。
  */
 import {
   fetchDailyPnl,
   fetchOrMock,
   fetchPositions,
+  fetchRolls,
 } from "@/lib/api"
-import { mockDailyPnl, mockPositions } from "@/lib/mock"
+import { mockDailyPnl, mockPositions, mockRolls } from "@/lib/mock"
 import { MockBanner } from "@/components/mock-banner"
 import { PositionsView } from "./positions-view.client"
-
-function todayStr(): string {
-  return new Date().toISOString().slice(0, 10)
-}
-function shiftDate(d: string, days: number): string {
-  return new Date(Date.parse(d) + days * 86400_000)
-    .toISOString()
-    .slice(0, 10)
-}
+import { todayStr, shiftDate } from "@/lib/date"
 
 export default async function PositionsPage() {
   const today = todayStr()
   const from = shiftDate(today, -90)
 
-  const [positionsResult, pnlResult] = await Promise.all([
+  const [positionsResult, pnlResult, rollsResult] = await Promise.all([
     fetchOrMock(
       () => fetchPositions(),
       () => mockPositions(),
@@ -35,10 +28,16 @@ export default async function PositionsPage() {
       () => fetchDailyPnl(from, today),
       () => mockDailyPnl(90),
     ),
+    fetchOrMock(
+      () => fetchRolls(),
+      () => mockRolls(),
+    ),
   ])
 
-  const isMock = positionsResult.isMock || pnlResult.isMock
-  const mockReason = positionsResult.error ?? pnlResult.error
+  const isMock =
+    positionsResult.isMock || pnlResult.isMock || rollsResult.isMock
+  const mockReason =
+    positionsResult.error ?? pnlResult.error ?? rollsResult.error
 
   return (
     <>
@@ -46,6 +45,7 @@ export default async function PositionsPage() {
       <PositionsView
         positions={positionsResult.data}
         pnl={pnlResult.data}
+        rolls={rollsResult.data}
       />
     </>
   )

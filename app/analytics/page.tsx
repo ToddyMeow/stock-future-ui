@@ -1,19 +1,27 @@
 /**
  * app/analytics/page.tsx — 分析（RSC）
  *
- * 后端暂无归因聚合端点（/api/reports/{date} 只拿当日指令 + equity_series）。
- * 当前整页走 mock；顶部 banner 说明原因，待后端 P1d 补齐后切真数据。
+ * 2026-04-20：切到真后端 `/api/analytics/breakdown`。
+ * MVP 期后端返空 {by_symbol:[], by_group:[]} — 实盘 fills 表空时是自然空，
+ * analytics-view 会展示"暂无数据"占位；有成交后后端升级聚合 SQL。
+ *
+ * 仍保留 fetchOrMock 降级（后端真断开时走 mockAnalyticsBreakdown = 空骨架 + 红色 banner）。
  */
+import { fetchAnalyticsBreakdown, fetchOrMock } from "@/lib/api"
 import { mockAnalyticsBreakdown } from "@/lib/mock"
 import { MockBanner } from "@/components/mock-banner"
 import { AnalyticsView } from "./analytics-view.client"
 
 export default async function AnalyticsPage() {
-  const data = mockAnalyticsBreakdown()
+  const result = await fetchOrMock(
+    () => fetchAnalyticsBreakdown(),
+    () => mockAnalyticsBreakdown(),
+  )
+
   return (
     <>
-      <MockBanner reason="后端归因聚合端点未就绪，暂用 mock" />
-      <AnalyticsView data={data} />
+      {result.isMock && <MockBanner reason={result.error} />}
+      <AnalyticsView data={result.data} />
     </>
   )
 }

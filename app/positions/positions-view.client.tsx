@@ -3,10 +3,16 @@
 /**
  * app/positions/positions-view.client.tsx — 当前持仓纯展示。
  *
- * 真实后端 Position 无 unrealized_pnl / last_price 字段（前端临时值），
- * 缺省时回退为 `last_price = avg_entry_price`，`unrealized_pnl = 0`。
+ * 后端 /api/positions 已返回 enriched 字段（last_price = 最近一日 bars.settle，
+ * contract_multiplier = bars 乘数，unrealized_pnl / notional_mv 均后端派生）。
+ * 若后端某字段缺失（bars 表无数据 fallback），前端做兜底：
+ *   - last_price   -> avg_entry_price
+ *   - unrealized_pnl -> 0
+ *   - contract_multiplier -> 10（兜底常量，正常不该走到）
  */
-import { useMemo } from "react"
+import { useMemo, useState, useTransition } from "react"
+import { useRouter } from "next/navigation"
+import { toast } from "sonner"
 import {
   Bar,
   BarChart,
@@ -33,29 +39,133 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { DirectionBadge, pnlClass } from "@/components/status-badges"
 import {
   formatCurrency,
   formatDate,
 } from "@/lib/mock"
-import type { DailyPnl, Position } from "@/lib/types"
+import { postRollConfirm } from "@/lib/api"
+import type { DailyPnl, Position, RollCandidate } from "@/lib/types"
+
+/** 换约对话框的表单状态（受控 input，字符串便于用户清空）。 */
+type RollDraft = {
+  old_close_price: string
+  new_open_price: string
+  note: string
+}
 
 export function PositionsView({
   positions,
   pnl,
+  rolls = [],
 }: {
   positions: Position[]
   pnl: DailyPnl[]
+  rolls?: RollCandidate[]
 }) {
+  const router = useRouter()
+  // 按 (symbol, current_contract) 索引换约候选，每行查询 O(1)
+  const rollMap = new Map<string, RollCandidate>()
+  for (const r of rolls) {
+    rollMap.set(`${r.symbol}|${r.current_contract}`, r)
+  }
   const latest = pnl[pnl.length - 1]
   const latestEquity = latest?.equity ?? 0
 
-  const totalNotional = positions.reduce((acc, p) => {
-    const last = p.last_price ?? Number(p.avg_entry_price)
-    return acc + Math.abs(p.qty) * last * 10
-  }, 0)
+  // ---------- 换约对话框状态 ----------
+  // 持 { candidate, position } —— 打开时填入，关闭时 null
+  const [rollTarget, setRollTarget] = useState<{
+    candidate: RollCandidate
+    position: Position
+  } | null>(null)
+  const [rollDraft, setRollDraft] = useState<RollDraft>({
+    old_close_price: "",
+    new_open_price: "",
+    note: "",
+  })
+  const [isRollSubmitting, startRollTransition] = useTransition()
+
+  const openRollDialog = (candidate: RollCandidate, position: Position) => {
+    setRollTarget({ candidate, position })
+    setRollDraft({
+      // 默认值取 candidate 的最新结算价（字符串 / 数字都可，Number() 转）
+      old_close_price:
+        candidate.current_last_price != null
+          ? String(candidate.current_last_price)
+          : "",
+      new_open_price:
+        candidate.new_last_price != null
+          ? String(candidate.new_last_price)
+          : "",
+      note: "",
+    })
+  }
+  const closeRollDialog = () => setRollTarget(null)
+
+  const handleRollSubmit = () => {
+    if (!rollTarget) return
+    const { candidate, position } = rollTarget
+    const oldPrice = Number(rollDraft.old_close_price)
+    const newPrice = Number(rollDraft.new_open_price)
+    if (!(oldPrice > 0 && newPrice > 0)) {
+      toast.error("请填写有效的旧合约平仓均价和新合约开仓均价")
+      return
+    }
+    startRollTransition(async () => {
+      try {
+        const resp = await postRollConfirm({
+          symbol: candidate.symbol,
+          old_contract: candidate.current_contract,
+          new_contract: candidate.new_dominant_contract,
+          old_close_price: oldPrice,
+          new_open_price: newPrice,
+          note: rollDraft.note.trim() || undefined,
+        })
+        toast.success(
+          `换约完成 ${resp.old_contract} → ${resp.new_contract} ${Math.abs(resp.qty)} 手`,
+          {
+            description: `新持仓均价 ${Number(resp.new_open_price).toLocaleString("zh-CN")}`,
+          },
+        )
+        closeRollDialog()
+        router.refresh()
+      } catch (err) {
+        toast.error("换约失败", {
+          description: err instanceof Error ? err.message : String(err),
+        })
+        // 失败保留对话框，让用户看到错误并修正（不 close）
+      }
+    })
+    void position // 保持引用避免 lint 警告（position 仅用作 display 上下文）
+  }
+
+  // 单条持仓名义价值：优先用后端 notional_mv；否则
+  // |qty| * (last_price ?? avg_entry) * (contract_multiplier ?? 10)
+  // 后端 Decimal 序列化为字符串，统一 Number() 强转。
+  const notionalOf = (p: Position) => {
+    if (p.notional_mv != null) return Number(p.notional_mv)
+    const last = Number(p.last_price ?? p.avg_entry_price)
+    const mult = Number(p.contract_multiplier ?? 10)
+    return Math.abs(p.qty) * last * mult
+  }
+
+  const totalNotional = positions.reduce((acc, p) => acc + notionalOf(p), 0)
+  // 注意：后端 Decimal 序列化为字符串，需 Number() 强转避免字符串拼接
   const totalUnrealized = positions.reduce(
-    (acc, p) => acc + (p.unrealized_pnl ?? 0),
+    (acc, p) => acc + Number(p.unrealized_pnl ?? 0),
     0,
   )
 
@@ -63,9 +173,7 @@ export function PositionsView({
   const groupExposure = useMemo(() => {
     const map = new Map<string, number>()
     for (const p of positions) {
-      const last = p.last_price ?? Number(p.avg_entry_price)
-      const notional = Math.abs(p.qty) * last * 10
-      map.set(p.group_name, (map.get(p.group_name) ?? 0) + notional)
+      map.set(p.group_name, (map.get(p.group_name) ?? 0) + notionalOf(p))
     }
     return Array.from(map.entries())
       .map(([group, notional]) => ({ group, notional }))
@@ -148,18 +256,19 @@ export function PositionsView({
                 <TableHead>方向</TableHead>
                 <TableHead className="text-right">手数</TableHead>
                 <TableHead className="text-right">均价</TableHead>
-                <TableHead className="text-right">最新价</TableHead>
+                <TableHead className="text-right">最新结算价</TableHead>
                 <TableHead className="text-right">止损价</TableHead>
                 <TableHead>策略组</TableHead>
                 <TableHead>开仓日期</TableHead>
-                <TableHead className="pr-4 text-right">浮动盈亏</TableHead>
+                <TableHead className="text-right">浮动盈亏</TableHead>
+                <TableHead className="pr-4">换约</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {positions.length === 0 && (
                 <TableRow>
                   <TableCell
-                    colSpan={10}
+                    colSpan={11}
                     className="text-center text-muted-foreground py-10"
                   >
                     暂无持仓
@@ -172,6 +281,7 @@ export function PositionsView({
                 const stop = p.stop_loss_price
                   ? Number(p.stop_loss_price)
                   : null
+                const roll = rollMap.get(`${p.symbol}|${p.contract_code}`)
                 return (
                   <TableRow key={`${p.symbol}-${p.contract_code}`}>
                     <TableCell className="pl-4 font-medium">{p.symbol}</TableCell>
@@ -205,9 +315,30 @@ export function PositionsView({
                       {formatDate(p.opened_at)}
                     </TableCell>
                     <TableCell
-                      className={`pr-4 text-right font-mono ${pnlClass(p.unrealized_pnl ?? 0)}`}
+                      className={`text-right font-mono ${pnlClass(Number(p.unrealized_pnl ?? 0))}`}
                     >
-                      {formatCurrency(p.unrealized_pnl ?? 0, true)}
+                      {formatCurrency(Number(p.unrealized_pnl ?? 0), true)}
+                    </TableCell>
+                    <TableCell className="pr-4">
+                      {roll ? (
+                        <div className="flex items-center gap-2">
+                          <Badge
+                            variant="destructive"
+                            title={`${roll.symbol}: ${roll.current_contract} → ${roll.new_dominant_contract}`}
+                          >
+                            需换约 → {roll.new_dominant_contract}
+                          </Badge>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openRollDialog(roll, p)}
+                          >
+                            换约完成
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
                     </TableCell>
                   </TableRow>
                 )
@@ -277,6 +408,112 @@ export function PositionsView({
           </div>
         </CardContent>
       </Card>
+
+      {/* 换约完成 Dialog（Q6 扩展）。用户在客户端平旧 + 开新后，
+          在这里确认 → 后端 apply_roll 单事务完成 positions 迁移 + 审计链路。 */}
+      <Dialog
+        open={rollTarget !== null}
+        onOpenChange={(o) => {
+          if (!o) closeRollDialog()
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>换约完成确认</DialogTitle>
+            <DialogDescription>
+              平旧开新已在客户端完成后点击确认 · 系统将同步 positions 并写入审计
+            </DialogDescription>
+          </DialogHeader>
+          {rollTarget && (
+            <div className="grid gap-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-1">
+                  <Label className="text-xs text-muted-foreground">
+                    旧合约
+                  </Label>
+                  <div className="font-mono text-sm">
+                    {rollTarget.candidate.current_contract}
+                  </div>
+                </div>
+                <div className="grid gap-1">
+                  <Label className="text-xs text-muted-foreground">
+                    新合约
+                  </Label>
+                  <div className="font-mono text-sm">
+                    {rollTarget.candidate.new_dominant_contract}
+                  </div>
+                </div>
+              </div>
+              <div className="grid gap-1">
+                <Label className="text-xs text-muted-foreground">数量</Label>
+                <div
+                  className={`font-mono text-sm ${pnlClass(rollTarget.position.qty)}`}
+                >
+                  {rollTarget.position.qty > 0 ? "+" : ""}
+                  {rollTarget.position.qty} 手（保持方向）
+                </div>
+              </div>
+              <div className="grid gap-1.5">
+                <Label>旧合约平仓均价</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={rollDraft.old_close_price}
+                  onChange={(e) =>
+                    setRollDraft((s) => ({
+                      ...s,
+                      old_close_price: e.target.value,
+                    }))
+                  }
+                  disabled={isRollSubmitting}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label>新合约开仓均价</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={rollDraft.new_open_price}
+                  onChange={(e) =>
+                    setRollDraft((s) => ({
+                      ...s,
+                      new_open_price: e.target.value,
+                    }))
+                  }
+                  disabled={isRollSubmitting}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label>备注（可选）</Label>
+                <Textarea
+                  placeholder="记录换约细节 / 价差原因等"
+                  value={rollDraft.note}
+                  onChange={(e) =>
+                    setRollDraft((s) => ({ ...s, note: e.target.value }))
+                  }
+                  className="min-h-16"
+                  disabled={isRollSubmitting}
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={closeRollDialog}
+              disabled={isRollSubmitting}
+            >
+              取消
+            </Button>
+            <Button
+              onClick={handleRollSubmit}
+              disabled={isRollSubmitting}
+            >
+              {isRollSubmitting ? "提交中…" : "确认换约"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

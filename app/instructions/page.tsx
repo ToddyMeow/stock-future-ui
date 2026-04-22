@@ -9,10 +9,7 @@ import { mockInstructions } from "@/lib/mock"
 import { MockBanner } from "@/components/mock-banner"
 import { InstructionsView } from "./instructions-view.client"
 import type { InstructionSession } from "@/lib/types"
-
-function todayStr(): string {
-  return new Date().toISOString().slice(0, 10)
-}
+import { todayStr } from "@/lib/date"
 
 type SearchParams = Promise<{ date?: string; session?: string }>
 

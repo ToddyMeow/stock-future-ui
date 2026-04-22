@@ -9,50 +9,54 @@ import {
   fetchInstructions,
   fetchOrMock,
   fetchRecentAlerts,
+  fetchRolls,
 } from "@/lib/api"
 import {
   mockAlerts,
   mockDailyPnl,
   mockInstructions,
+  mockRolls,
 } from "@/lib/mock"
 import { MockBanner } from "@/components/mock-banner"
 import { DashboardView } from "./dashboard-view.client"
+import { todayStr, shiftDate } from "@/lib/date"
 
 /** 取 ISO YYYY-MM-DD。 */
-function todayStr(): string {
-  return new Date().toISOString().slice(0, 10)
-}
-
 /** 日期减 N 天。 */
-function shiftDate(d: string, days: number): string {
-  return new Date(Date.parse(d) + days * 86400_000)
-    .toISOString()
-    .slice(0, 10)
-}
-
 export default async function DashboardPage() {
   const today = todayStr()
   const from = shiftDate(today, -90)
 
-  const [pnlResult, instructionsResult, alertsResult] = await Promise.all([
-    fetchOrMock(
-      () => fetchDailyPnl(from, today),
-      () => mockDailyPnl(90),
-    ),
-    fetchOrMock(
-      () => fetchInstructions(today),
-      () => mockInstructions(),
-    ),
-    fetchOrMock(
-      () => fetchRecentAlerts(10),
-      () => mockAlerts(),
-    ),
-  ])
+  const [pnlResult, instructionsResult, alertsResult, rollsResult] =
+    await Promise.all([
+      fetchOrMock(
+        () => fetchDailyPnl(from, today),
+        () => mockDailyPnl(90),
+      ),
+      fetchOrMock(
+        () => fetchInstructions(today),
+        () => mockInstructions(),
+      ),
+      fetchOrMock(
+        () => fetchRecentAlerts(10),
+        () => mockAlerts(),
+      ),
+      fetchOrMock(
+        () => fetchRolls(),
+        () => mockRolls(),
+      ),
+    ])
 
   const isMock =
-    pnlResult.isMock || instructionsResult.isMock || alertsResult.isMock
+    pnlResult.isMock ||
+    instructionsResult.isMock ||
+    alertsResult.isMock ||
+    rollsResult.isMock
   const mockReason =
-    pnlResult.error ?? instructionsResult.error ?? alertsResult.error
+    pnlResult.error ??
+    instructionsResult.error ??
+    alertsResult.error ??
+    rollsResult.error
 
   return (
     <>
@@ -61,6 +65,7 @@ export default async function DashboardPage() {
         pnlSeries={pnlResult.data}
         instructions={instructionsResult.data}
         alerts={alertsResult.data}
+        rolls={rollsResult.data}
       />
     </>
   )

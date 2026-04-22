@@ -10,10 +10,7 @@ import { mockInstructions } from "@/lib/mock"
 import { MockBanner } from "@/components/mock-banner"
 import { HistoryView } from "./history-view.client"
 import type { Instruction } from "@/lib/types"
-
-function todayStr(): string {
-  return new Date().toISOString().slice(0, 10)
-}
+import { todayStr } from "@/lib/date"
 
 type SearchParams = Promise<{ date?: string }>
 

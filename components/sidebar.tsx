@@ -6,8 +6,11 @@ import { cn } from "@/lib/utils"
 
 const NAV_ITEMS = [
   { href: "/", label: "仪表盘" },
-  { href: "/instructions", label: "今日指令" },
+  { href: "/engine-status", label: "引擎状态" },
+  { href: "/formulas", label: "风险与公式" },
   { href: "/positions", label: "当前持仓" },
+  { href: "/universe", label: "盯盘品种" },
+  { href: "/instructions", label: "今日指令" },
   { href: "/history", label: "历史查询" },
   { href: "/analytics", label: "分析" },
   { href: "/reports/today", label: "每日报告" },
@@ -17,7 +20,7 @@ export function Sidebar() {
   const pathname = usePathname()
 
   return (
-    <aside className="w-60 border-r border-border bg-background p-4 shrink-0">
+    <aside className="hidden md:flex md:flex-col w-60 border-r border-border bg-background p-4 shrink-0">
       <div className="mb-6 px-2">
         <h2 className="text-lg font-semibold tracking-tight">期货实盘</h2>
         <p className="text-xs text-muted-foreground mt-1">半自动交易控制台</p>

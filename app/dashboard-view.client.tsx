@@ -31,16 +31,18 @@ import {
   formatPct,
   formatTime,
 } from "@/lib/mock"
-import type { Alert, DailyPnl, Instruction } from "@/lib/types"
+import type { Alert, DailyPnl, Instruction, RollCandidate } from "@/lib/types"
 
 export function DashboardView({
   pnlSeries,
   instructions,
   alerts,
+  rolls = [],
 }: {
   pnlSeries: DailyPnl[]
   instructions: Instruction[]
   alerts: Alert[]
+  rolls?: RollCandidate[]
 }) {
   // 边界：空序列占位（极少概率——后端新账户第一天）
   if (pnlSeries.length === 0) {
@@ -89,7 +91,7 @@ export function DashboardView({
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
         <Card>
           <CardHeader>
             <CardDescription>今日盈亏</CardDescription>
@@ -125,11 +127,13 @@ export function DashboardView({
         <Card>
           <CardHeader>
             <CardDescription>Sharpe Ratio (90d)</CardDescription>
-            <CardTitle className="text-2xl font-bold">1.08</CardTitle>
+            <CardTitle className="text-2xl font-bold text-muted-foreground">
+              —
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted-foreground">
-              DSR 0.886 · 无风险利率 2%
+              实盘样本不足 90 日，暂不计算
             </p>
           </CardContent>
         </Card>
@@ -142,10 +146,40 @@ export function DashboardView({
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted-foreground">
-              距 soft stop 阈值 (-5%) 剩余 {formatPct(-0.05 - maxDD, 2)}
+              soft_stop 一期已关闭（Q3）
             </p>
           </CardContent>
         </Card>
+        {/* Q6：待换约 KPI 卡 — 数字 > 0 时红色，点击跳 /positions */}
+        <Link href="/positions" className="block">
+          <Card
+            className={
+              rolls.length > 0
+                ? "border-destructive transition-colors hover:bg-muted/40 cursor-pointer"
+                : "transition-colors hover:bg-muted/40 cursor-pointer"
+            }
+          >
+            <CardHeader>
+              <CardDescription>待换约</CardDescription>
+              <CardTitle
+                className={`text-2xl font-bold ${
+                  rolls.length > 0 ? "text-red-600" : ""
+                }`}
+              >
+                {rolls.length} 条
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-xs text-muted-foreground">
+                {rolls.length > 0
+                  ? `${rolls.map((r) => r.symbol).slice(0, 3).join(" / ")}${
+                      rolls.length > 3 ? " ..." : ""
+                    } · 点击查看`
+                  : "持仓全部对齐最新主力合约"}
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
       </div>
 
       {/* 权益曲线 + 侧栏 */}

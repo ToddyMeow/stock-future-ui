@@ -123,8 +123,21 @@
   }
   body {
     @apply bg-background text-foreground;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: none;
   }
   html {
     @apply font-sans;
+  }
+  /* 防 iOS Safari 聚焦输入框时自动缩放：字体 ≥16px */
+  input, select, textarea {
+    font-size: 16px;
+  }
+  /* 表格在手机上自动横向滚动 */
+  @media (max-width: 767px) {
+    table {
+      font-size: 0.875rem;
+    }
   }
 }

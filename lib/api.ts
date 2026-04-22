@@ -12,11 +12,16 @@ import type {
   AlertSeverity,
   DailyPnl,
   DailyReport,
+  EngineStatus,
   Fill,
   FillCreate,
+  FormulasContext,
   Instruction,
   InstructionStatus,
   Position,
+  RollCandidate,
+  RollConfirmResponse,
+  UniverseSymbol,
 } from "./types"
 
 // =====================================================================
@@ -24,7 +29,10 @@ import type {
 // =====================================================================
 
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
+  process.env.NEXT_PUBLIC_API_URL ||
+  (typeof window === "undefined"
+    ? "http://127.0.0.1:8000"
+    : "")
 
 /** 健康检查响应（后端 health 端点结构）。 */
 export interface HealthResponse {
@@ -129,6 +137,34 @@ export async function fetchPositions(): Promise<Position[]> {
   return http<Position[]>("/api/positions")
 }
 
+/** GET /api/rolls — 主力合约切换候选（Q6）。 */
+export async function fetchRolls(): Promise<RollCandidate[]> {
+  return http<RollCandidate[]>("/api/rolls")
+}
+
+/**
+ * POST /api/rolls/confirm — 换约一键确认（Q6）。
+ *
+ * 提交旧合约平仓均价 + 新合约开仓均价；后端在单事务内
+ * 完成 positions 迁移 + 2 条 fully_filled instructions + 2 条
+ * fills（trigger_source=roll_contract）+ 1 条 info alerts。
+ */
+export async function postRollConfirm(body: {
+  symbol: string
+  old_contract: string
+  new_contract: string
+  old_close_price: number
+  new_open_price: number
+  closed_at?: string
+  opened_at?: string
+  note?: string
+}): Promise<RollConfirmResponse> {
+  return http<RollConfirmResponse>("/api/rolls/confirm", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
 /** GET /api/daily_pnl?from=...&to=... — 日结权益序列。 */
 export async function fetchDailyPnl(
   from: string,
@@ -222,6 +258,44 @@ export async function fetchRecentAlerts(
   const q = new URLSearchParams({ n: String(n) })
   if (severity) q.set("severity", severity)
   return http<Alert[]>(`/api/alerts/recent?${q.toString()}`)
+}
+
+/**
+ * GET /api/engine-status — 引擎活体 / launchd 下次触发 / 最近 14 天指令 / 告警。
+ *
+ * 前端 /engine-status 页面 30 秒自动刷新用。
+ */
+export async function fetchEngineStatus(): Promise<EngineStatus> {
+  return http<EngineStatus>("/api/engine-status")
+}
+
+/**
+ * GET /api/analytics/breakdown — 按品种 / 组的交易归因聚合。
+ *
+ * MVP 后端返空结构（fills 表空），实盘成交后升级为真实聚合 SQL。
+ */
+export async function fetchAnalyticsBreakdown(): Promise<import("./types").AnalyticsBreakdown> {
+  return http<import("./types").AnalyticsBreakdown>("/api/analytics/breakdown")
+}
+
+/**
+ * GET /api/universe — 盯盘品种清单（final_v3 配置 13 品种）。
+ *
+ * 后端融合了 phase0_250k 单手风险 + phase3 combo + bars 最新主力 + positions，
+ * 前端用于 /universe 页展示"今天盯盘哪些品种、哪些 25 万下能开仓"。
+ */
+export async function fetchUniverse(): Promise<UniverseSymbol[]> {
+  return http<UniverseSymbol[]>("/api/universe")
+}
+
+/**
+ * GET /api/formulas-context — /formulas 页"代入公式所需的当前实盘数字"。
+ *
+ * 后端聚合 live/config.py + signal_service 覆盖 + EngineConfig 默认 +
+ * daily_pnl 最新一行 + positions 按定义 B 聚合。
+ */
+export async function fetchFormulasContext(): Promise<FormulasContext> {
+  return http<FormulasContext>("/api/formulas-context")
 }
 
 // =====================================================================

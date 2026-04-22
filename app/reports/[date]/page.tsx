@@ -39,23 +39,14 @@ import {
 } from "@/lib/mock"
 import { STATUS_LABELS } from "@/lib/types"
 import { DailyReportChart } from "./chart.client"
+import { todayStr, shiftDate } from "@/lib/date"
 
 type Params = Promise<{ date: string }>
-
-function todayStr(): string {
-  return new Date().toISOString().slice(0, 10)
-}
 
 function normalizeDate(d: string): string {
   if (d === "today") return todayStr()
   if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d
   return todayStr()
-}
-
-function shiftDate(d: string, days: number): string {
-  return new Date(Date.parse(d) + days * 86400_000)
-    .toISOString()
-    .slice(0, 10)
 }
 
 export default async function DailyReportPage({
