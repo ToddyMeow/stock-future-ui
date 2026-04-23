@@ -13,6 +13,13 @@ import type {
   DailyPnl,
   DailyReport,
   EngineStatus,
+  ExperimentArtifactResponse,
+  ExperimentLaunchRequest,
+  ExperimentPhaseSummaryResponse,
+  ExperimentRunMutationResponse,
+  ExperimentRunDetail,
+  ExperimentRunSummary,
+  ExperimentStrategyCatalog,
   Fill,
   FillCreate,
   FormulasContext,
@@ -331,4 +338,97 @@ export async function fetchOrMockClient<T>(
   mockFn: () => T,
 ): Promise<{ data: T; isMock: boolean; error?: string }> {
   return fetchOrMock(fetchFn, mockFn)
+}
+
+async function localHttp<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+    cache: "no-store",
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => "")
+    throw new Error(`${res.status} ${res.statusText}: ${body.slice(0, 200)}`)
+  }
+  return (await res.json()) as T
+}
+
+export async function listExperimentRunsClient(): Promise<ExperimentRunSummary[]> {
+  const payload = await localHttp<{ runs: ExperimentRunSummary[] }>("/workspace-api/experiments")
+  return payload.runs
+}
+
+export async function launchExperimentClient(
+  body: ExperimentLaunchRequest,
+): Promise<ExperimentRunSummary> {
+  const payload = await localHttp<{ run: ExperimentRunSummary }>("/workspace-api/experiments", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+  return payload.run
+}
+
+export async function fetchExperimentStrategyCatalogClient(): Promise<ExperimentStrategyCatalog> {
+  const payload = await localHttp<{ catalog: ExperimentStrategyCatalog }>("/workspace-api/experiments/strategies")
+  return payload.catalog
+}
+
+export async function fetchExperimentRunClient(runId: string): Promise<ExperimentRunDetail> {
+  const payload = await localHttp<{ run: ExperimentRunDetail }>(`/workspace-api/experiments/${runId}`)
+  return payload.run
+}
+
+export async function archiveExperimentRunClient(runId: string): Promise<ExperimentRunDetail> {
+  const payload = await localHttp<ExperimentRunMutationResponse>(`/workspace-api/experiments/${runId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ action: "archive" }),
+  })
+  return payload.run
+}
+
+export async function restoreExperimentRunClient(runId: string): Promise<ExperimentRunDetail> {
+  const payload = await localHttp<ExperimentRunMutationResponse>(`/workspace-api/experiments/${runId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ action: "restore" }),
+  })
+  return payload.run
+}
+
+export async function deleteExperimentRunClient(runId: string): Promise<void> {
+  await localHttp<{ ok: boolean }>(`/workspace-api/experiments/${runId}`, {
+    method: "DELETE",
+  })
+}
+
+export async function fetchExperimentArtifactClient(params: {
+  runId: string
+  capital: string
+  phase: string
+  artifact: string
+  limit?: number
+}): Promise<ExperimentArtifactResponse> {
+  const query = new URLSearchParams({
+    capital: params.capital,
+    phase: params.phase,
+    artifact: params.artifact,
+    limit: String(params.limit ?? 200),
+  })
+  return localHttp<ExperimentArtifactResponse>(`/workspace-api/experiments/${params.runId}/artifact?${query.toString()}`)
+}
+
+export async function fetchExperimentPhaseSummaryClient(params: {
+  runId: string
+  capital: string
+  phase: string
+}): Promise<ExperimentPhaseSummaryResponse> {
+  const query = new URLSearchParams({
+    capital: params.capital,
+    phase: params.phase,
+  })
+  return localHttp<ExperimentPhaseSummaryResponse>(
+    `/workspace-api/experiments/${params.runId}/phase-summary?${query.toString()}`,
+  )
 }

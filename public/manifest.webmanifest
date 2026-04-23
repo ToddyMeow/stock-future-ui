@@ -1,7 +1,7 @@
 {
-  "name": "期货实盘控制台",
-  "short_name": "期货实盘",
-  "description": "中国期货半自动实盘交易系统",
+  "name": "Velvet Anchor",
+  "short_name": "Velvet Anchor",
+  "description": "Velvet Anchor · 中国期货半自动交易控制台",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",
@@ -9,9 +9,9 @@
   "theme_color": "#0a0a0a",
   "icons": [
     {
-      "src": "/favicon.ico",
+      "src": "/velvet-anchor-mark.svg",
       "sizes": "any",
-      "type": "image/x-icon"
+      "type": "image/svg+xml"
     }
   ]
 }

@@ -212,6 +212,155 @@ export interface AnalyticsBreakdown {
 }
 
 // =====================================================================
+// Alpha Attribution Experiments
+// =====================================================================
+
+export type ExperimentRunStatus = "queued" | "running" | "completed" | "failed" | "interrupted"
+export type ExperimentPhaseId = "phase0" | "phase1" | "phase2" | "phase3" | "phase4" | "phase5"
+export type ExperimentPhaseStatus = "pending" | "running" | "completed"
+
+export interface ExperimentPhaseProgress {
+  phase: ExperimentPhaseId
+  label: string
+  status: ExperimentPhaseStatus
+  has_output: boolean
+  is_current: boolean
+}
+
+export interface ExperimentCapitalProgress {
+  capital: number
+  current_phase: ExperimentPhaseId | null
+  current_phase_label: string | null
+  latest_log: string | null
+  progress_completed: number | null
+  progress_total: number | null
+  progress_unit: string | null
+  progress_percent: number | null
+  last_completed_label: string | null
+  phases: ExperimentPhaseProgress[]
+}
+
+export interface ExperimentStrategyParameterDescriptor {
+  name: string
+  value_type: "integer" | "number" | "string" | "boolean" | "enum"
+  value: string | number | boolean | null
+  code_default: string | number | boolean | null
+  source: string
+  editable: boolean
+  options: Array<string | number | boolean>
+}
+
+export interface ExperimentStrategyDescriptor {
+  strategy_id: string
+  kind: "entry" | "exit"
+  label: string
+  module: string
+  origin: string
+  default_selected: boolean
+  baseline_only: boolean
+  parameters: ExperimentStrategyParameterDescriptor[]
+}
+
+export interface ExperimentStrategyCatalog {
+  entries: ExperimentStrategyDescriptor[]
+  exits: ExperimentStrategyDescriptor[]
+}
+
+export interface ExperimentSweepDimension {
+  strategy_id: string
+  strategy_label: string
+  parameter_name: string
+  parameter_label: string
+  kind: "entry" | "exit"
+  base_value: string | number | boolean | null
+  candidate_values: Array<string | number | boolean>
+}
+
+export interface ExperimentSweepChangedDimension {
+  strategy_id: string
+  strategy_label: string
+  parameter_name: string
+  parameter_label: string
+  kind: "entry" | "exit"
+  base_value: string | number | boolean | null
+  value: string | number | boolean
+}
+
+export interface ExperimentSweepMeta {
+  group_id: string
+  group_label: string
+  created_at: string
+  member_index: number
+  member_count: number
+  member_label: string
+  dimensions: ExperimentSweepDimension[]
+  changed_dimensions: ExperimentSweepChangedDimension[]
+}
+
+export interface ExperimentLaunchRequest {
+  run_id?: string
+  run_name: string
+  capitals: number[]
+  entries?: string[]
+  exits?: string[]
+  entry_params?: Record<string, Record<string, string | number | boolean>>
+  exit_params?: Record<string, Record<string, string | number | boolean>>
+  seed_count: number
+  bootstrap_count: number
+  output_suffix?: string
+  extend_from_run_id?: string | null
+  rerun_phases?: boolean
+  max_workers?: number
+  sweep?: ExperimentSweepMeta | null
+}
+
+export interface ExperimentRunSummary {
+  run_id: string
+  run_name: string
+  output_suffix: string | null
+  status: ExperimentRunStatus
+  is_archived: boolean
+  archived_at: string | null
+  started_at: string
+  completed_at: string | null
+  capitals: number[]
+  pid: number | null
+  max_workers: number
+  summary_path: string
+  report_path: string
+  log_path: string
+  capital_summaries: Record<string, unknown> | null
+  capital_progress: ExperimentCapitalProgress[]
+  sweep: ExperimentSweepMeta | null
+}
+
+export interface ExperimentRunDetail extends ExperimentRunSummary {
+  manifest: Record<string, unknown> | null
+  summary: Record<string, unknown> | null
+  log_tail: string
+}
+
+export interface ExperimentArtifactResponse {
+  run_id: string
+  capital: string
+  phase: string
+  artifact: string
+  row_count: number
+  rows: Array<Record<string, unknown>>
+}
+
+export interface ExperimentPhaseSummaryResponse {
+  run_id: string
+  capital: string
+  phase: string
+  summary: Record<string, unknown> | null
+}
+
+export interface ExperimentRunMutationResponse {
+  run: ExperimentRunDetail
+}
+
+// =====================================================================
 // UI 辅助
 // =====================================================================
 

@@ -1,0 +1,43 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="14" y1="12" x2="112" y2="118" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0F172A"/>
+      <stop offset="1" stop-color="#1E293B"/>
+    </linearGradient>
+    <linearGradient id="halo" x1="36" y1="28" x2="92" y2="98" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7A1F38"/>
+      <stop offset="0.55" stop-color="#B73B4F"/>
+      <stop offset="1" stop-color="#E07A5F"/>
+    </linearGradient>
+    <linearGradient id="velvet" x1="28" y1="22" x2="83" y2="66" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5B1027"/>
+      <stop offset="0.45" stop-color="#8D213C"/>
+      <stop offset="1" stop-color="#D26A5A"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="6" y="6" width="116" height="116" rx="30" fill="url(#bg)"/>
+  <circle cx="64" cy="66" r="42" fill="url(#halo)"/>
+
+  <path
+    d="M28 43C40 28 58 20 86 23C77 30 70 38 66 49C59 63 46 71 30 72C35 61 35 51 28 43Z"
+    fill="url(#velvet)"
+  />
+
+  <path
+    d="M64 29C59.582 29 56 32.582 56 37C56 41.418 59.582 45 64 45C68.418 45 72 41.418 72 37C72 32.582 68.418 29 64 29Z"
+    stroke="#F7E6C7"
+    stroke-width="6"
+  />
+  <path d="M64 45V86" stroke="#F7E6C7" stroke-width="6" stroke-linecap="round"/>
+  <path d="M49 59H79" stroke="#F7E6C7" stroke-width="6" stroke-linecap="round"/>
+  <path
+    d="M42 84C42 96.15 51.85 106 64 106C76.15 106 86 96.15 86 84"
+    stroke="#F7E6C7"
+    stroke-width="6"
+    stroke-linecap="round"
+  />
+  <path d="M64 84L52 96" stroke="#F7E6C7" stroke-width="6" stroke-linecap="round"/>
+  <path d="M64 84L76 96" stroke="#F7E6C7" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="64" cy="37" r="3.5" fill="#0F172A"/>
+</svg>
