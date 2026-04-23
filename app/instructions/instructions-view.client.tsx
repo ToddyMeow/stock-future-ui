@@ -1,63 +1,24 @@
 "use client"
 
 /**
- * app/instructions/instructions-view.client.tsx — 指令表格 + 回填 / 否决 / 跳过
+ * app/instructions/instructions-view.client.tsx — 今日指令（V1 Morandi 设计）
  *
- * 与 P2a 差异：
- *   - date / session 来自 URL searchParams（RSC 传入），切换通过 router.replace 回写 URL
- *   - 所有写操作调真 API；成功后 router.refresh() 让父 RSC 重拉数据
- *   - 提交期间禁用按钮避免重复提交
+ * 保留 P2b 所有真写接口：postFill / vetoInstruction / skipInstruction。
+ * 切换 date/session 通过 router.replace 回写 URL，父 RSC 重拉。
  */
 import { Fragment, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import {
-  ActionBadge,
-  DirectionBadge,
-  StatusBadge,
-  pnlClass,
-} from "@/components/status-badges"
+import { ActionPill, DirPill, StatusPill } from "@/components/pills"
+import { postFill, skipInstruction, vetoInstruction } from "@/lib/api"
+import { fmtY, signCls } from "@/lib/format"
 import {
   type Instruction,
   type InstructionSession,
+  type InstructionStatus,
   type TriggerSource,
   TRIGGER_SOURCE_LABELS,
 } from "@/lib/types"
-import {
-  postFill,
-  skipInstruction,
-  vetoInstruction,
-} from "@/lib/api"
 
 type RowDraft = {
   filled_qty: string
@@ -73,6 +34,14 @@ const EMPTY_DRAFT: RowDraft = {
   note: "",
 }
 
+const FILTERS: Array<[InstructionStatus | "all", string]> = [
+  ["all", "全部"],
+  ["pending", "待处理"],
+  ["partially_filled", "部分"],
+  ["fully_filled", "已成交"],
+  ["vetoed", "已否决"],
+]
+
 export function InstructionsView({
   instructions,
   date,
@@ -86,14 +55,20 @@ export function InstructionsView({
   const [isPending, startTransition] = useTransition()
   const [submittingId, setSubmittingId] = useState<string | null>(null)
 
+  const [filter, setFilter] = useState<InstructionStatus | "all">("all")
+  const [sortBy, setSortBy] = useState<"time" | "symbol">("time")
+
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<Record<string, RowDraft>>({})
   const [vetoTarget, setVetoTarget] = useState<string | null>(null)
   const [vetoReason, setVetoReason] = useState("")
   const [vetoErr, setVetoErr] = useState(false)
 
-  const rows = instructions
-  const pendingCount = rows.filter(
+  const allRows = instructions
+  let rows = filter === "all" ? allRows : allRows.filter((r) => r.status === filter)
+  if (sortBy === "symbol") rows = [...rows].sort((a, b) => a.symbol.localeCompare(b.symbol))
+
+  const pendingCount = allRows.filter(
     (r) => r.status === "pending" || r.status === "partially_filled",
   ).length
 
@@ -101,7 +76,6 @@ export function InstructionsView({
   const setDraft = (id: string, patch: Partial<RowDraft>) =>
     setDrafts((s) => ({ ...s, [id]: { ...getDraft(id), ...patch } }))
 
-  /** URL 回写：切 date/session 触发 RSC 重新拉数据。 */
   const updateUrl = (next: { date?: string; session?: string }) => {
     const q = new URLSearchParams({
       date: next.date ?? date,
@@ -110,7 +84,7 @@ export function InstructionsView({
     router.replace(`/instructions?${q.toString()}`)
   }
 
-  // ---------- 回填 ----------
+  // ---------- Fill 回填 ----------
   const handleRowSubmit = (id: string) => {
     const d = getDraft(id)
     const qty = Number(d.filled_qty)
@@ -150,15 +124,12 @@ export function InstructionsView({
     })
   }
 
-  // ---------- 跳过 ----------
   const handleSkip = (id: string) => {
     setSubmittingId(id)
     startTransition(async () => {
       try {
         await skipInstruction(id)
-        toast.message("已标记跳过", {
-          description: `指令 ${id.slice(0, 14)}… 不再追踪`,
-        })
+        toast.message("已标记跳过", { description: `指令 ${id.slice(0, 14)}… 不再追踪` })
         setExpandedId(null)
         router.refresh()
       } catch (err) {
@@ -171,7 +142,6 @@ export function InstructionsView({
     })
   }
 
-  // ---------- 否决 ----------
   const handleVetoSubmit = () => {
     if (!vetoReason.trim()) {
       setVetoErr(true)
@@ -183,9 +153,7 @@ export function InstructionsView({
     startTransition(async () => {
       try {
         await vetoInstruction(id, vetoReason.trim())
-        toast.error(`已否决：${vetoReason.slice(0, 30)}`, {
-          description: "原因已写入审计日志",
-        })
+        toast.error(`已否决：${vetoReason.slice(0, 30)}`, { description: "原因已写入审计日志" })
         setVetoTarget(null)
         setVetoReason("")
         setVetoErr(false)
@@ -202,240 +170,234 @@ export function InstructionsView({
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">今日指令</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            回填实际成交 · 否决 · 跳过 — 每条指令必须闭环
-          </p>
+    <>
+      <h1 className="page">今日指令</h1>
+      <div className="sub">回填实际成交 · 否决 · 跳过 — 每条指令必须闭环</div>
+
+      <div className="card-va" style={{ marginTop: 16 }}>
+        <div
+          className="hd"
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <div className="ti">
+              {session === "day" ? "日盘" : "夜盘"} · {date}
+            </div>
+            <div className="de">
+              共 {allRows.length} 条 · 匹配 {rows.length} 条 · 待处理 {pendingCount}
+            </div>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              gap: 6,
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => updateUrl({ date: e.target.value })}
+              className="btn"
+              style={{
+                padding: "5px 10px",
+                fontSize: 12,
+                fontFamily: "var(--font-mono)",
+              }}
+            />
+            <div className="seg">
+              <button
+                className={session === "day" ? "on" : ""}
+                onClick={() => updateUrl({ session: "day" })}
+              >
+                日盘
+              </button>
+              <button
+                className={session === "night" ? "on" : ""}
+                onClick={() => updateUrl({ session: "night" })}
+              >
+                夜盘
+              </button>
+            </div>
+            <span
+              style={{
+                width: 1,
+                height: 18,
+                background: "var(--porcelain-200)",
+                margin: "0 2px",
+              }}
+            />
+            {FILTERS.map(([k, l]) => (
+              <button
+                key={k}
+                className={`btn ${filter === k ? "prim" : ""}`}
+                onClick={() => setFilter(k)}
+              >
+                {l}
+              </button>
+            ))}
+            <span
+              style={{
+                width: 1,
+                height: 18,
+                background: "var(--porcelain-200)",
+                margin: "0 2px",
+              }}
+            />
+            <button
+              className="btn"
+              onClick={() => setSortBy((s) => (s === "time" ? "symbol" : "time"))}
+            >
+              排序：{sortBy === "time" ? "时间" : "品种"}
+            </button>
+          </div>
+        </div>
+        <div className="bd" style={{ padding: 0 }}>
+          <div style={{ overflowX: "auto" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th style={{ paddingLeft: 16 }}>品种</th>
+                  <th>合约</th>
+                  <th>动作</th>
+                  <th>方向</th>
+                  <th className="ta-r">目标</th>
+                  <th className="ta-r">参考入场</th>
+                  <th className="ta-r">止损</th>
+                  <th className="ta-r">已成交</th>
+                  <th>状态</th>
+                  <th className="ta-r" style={{ paddingRight: 16 }}>
+                    操作
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={10}
+                      style={{
+                        textAlign: "center",
+                        color: "var(--graphite-500)",
+                        padding: "40px 12px",
+                      }}
+                    >
+                      该日期 / 时段没有指令
+                    </td>
+                  </tr>
+                )}
+                {rows.map((r) => {
+                  const locked = ["fully_filled", "vetoed", "skipped", "expired"].includes(
+                    r.status,
+                  )
+                  const exp = expandedId === r.id
+                  const rem = r.target_qty - (r.filled_qty_total ?? 0)
+                  const rowSubmitting = submittingId === r.id && isPending
+                  return (
+                    <Fragment key={r.id}>
+                      <tr>
+                        <td style={{ fontWeight: 500, paddingLeft: 16 }}>{r.symbol}</td>
+                        <td
+                          className="num"
+                          style={{ fontSize: 11, color: "var(--graphite-600)" }}
+                        >
+                          {r.contract_code}
+                        </td>
+                        <td>
+                          <ActionPill action={r.action} />
+                        </td>
+                        <td>
+                          <DirPill dir={r.direction} />
+                        </td>
+                        <td className="ta-r num">{r.target_qty}</td>
+                        <td className="ta-r num flat">{r.entry_price_ref ?? "—"}</td>
+                        <td className="ta-r num flat">{r.stop_loss_ref ?? "—"}</td>
+                        <td className="ta-r num">
+                          {r.filled_qty_total ?? 0}/{r.target_qty}
+                        </td>
+                        <td>
+                          <StatusPill status={r.status} />
+                        </td>
+                        <td className="ta-r" style={{ paddingRight: 16 }}>
+                          {locked ? (
+                            <span style={{ fontSize: 11, color: "var(--graphite-500)" }}>
+                              已结束
+                            </span>
+                          ) : (
+                            <button
+                              className="btn"
+                              onClick={() => {
+                                setExpandedId(exp ? null : r.id)
+                              }}
+                            >
+                              {exp ? "收起" : "展开"}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                      {exp && !locked && (
+                        <tr>
+                          <td
+                            colSpan={10}
+                            style={{ background: "var(--porcelain-50)", padding: 16 }}
+                          >
+                            <InlineFillForm
+                              draft={getDraft(r.id)}
+                              maxQty={rem}
+                              refPrice={r.entry_price_ref ?? null}
+                              disabled={rowSubmitting}
+                              onChange={(p) => setDraft(r.id, p)}
+                              onSubmit={() => handleRowSubmit(r.id)}
+                              onVeto={() => {
+                                setVetoTarget(r.id)
+                                setVetoReason("")
+                                setVetoErr(false)
+                              }}
+                              onSkip={() => handleSkip(r.id)}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>筛选</CardTitle>
-          <CardDescription>选择业务日期和交易时段</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap items-end gap-4">
-            <div className="grid gap-1.5">
-              <Label>业务日期</Label>
-              <Input
-                type="date"
-                value={date}
-                onChange={(e) => updateUrl({ date: e.target.value })}
-                className="w-44"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label>交易时段</Label>
-              <RadioGroup
-                className="flex gap-4"
-                value={session}
-                onValueChange={(v) =>
-                  updateUrl({ session: (v as InstructionSession) ?? "day" })
-                }
-              >
-                <label className="flex items-center gap-2 cursor-pointer text-sm">
-                  <RadioGroupItem value="day" /> 日盘
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer text-sm">
-                  <RadioGroupItem value="night" /> 夜盘
-                </label>
-              </RadioGroup>
-            </div>
-            <div className="ml-auto flex gap-2 text-xs text-muted-foreground">
-              <Badge variant="outline">共 {rows.length} 条</Badge>
-              <Badge className="bg-red-600 text-white">
-                待处理 {pendingCount}
-              </Badge>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>指令列表</CardTitle>
-          <CardDescription>
-            点击右侧"展开"进入回填 / 否决 / 跳过操作
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="px-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="pl-4">品种</TableHead>
-                <TableHead>合约</TableHead>
-                <TableHead>动作</TableHead>
-                <TableHead>方向</TableHead>
-                <TableHead className="text-right">目标手数</TableHead>
-                <TableHead className="text-right">参考入场</TableHead>
-                <TableHead className="text-right">参考止损</TableHead>
-                <TableHead className="text-right">已成交</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead className="pr-4 text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.length === 0 && (
-                <TableRow>
-                  <TableCell
-                    colSpan={10}
-                    className="text-center text-muted-foreground py-10"
-                  >
-                    该日期 / 时段没有指令
-                  </TableCell>
-                </TableRow>
-              )}
-              {rows.map((r) => {
-                const isExpanded = expandedId === r.id
-                const locked =
-                  r.status === "fully_filled" ||
-                  r.status === "vetoed" ||
-                  r.status === "skipped" ||
-                  r.status === "expired"
-                const remaining = r.target_qty - (r.filled_qty_total ?? 0)
-                const isRowSubmitting = submittingId === r.id && isPending
-
-                return (
-                  <Fragment key={r.id}>
-                    <TableRow
-                      aria-expanded={isExpanded}
-                      className="align-middle"
-                    >
-                      <TableCell className="pl-4 font-medium">
-                        {r.symbol}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {r.contract_code}
-                      </TableCell>
-                      <TableCell>
-                        <ActionBadge action={r.action} />
-                      </TableCell>
-                      <TableCell>
-                        <DirectionBadge direction={r.direction} />
-                      </TableCell>
-                      <TableCell className="text-right font-mono">
-                        {r.target_qty}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-muted-foreground">
-                        {r.entry_price_ref ?? "—"}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-muted-foreground">
-                        {r.stop_loss_ref ?? "—"}
-                      </TableCell>
-                      <TableCell className="text-right font-mono">
-                        {r.filled_qty_total ?? 0} / {r.target_qty}
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={r.status} />
-                      </TableCell>
-                      <TableCell className="pr-4 text-right">
-                        {locked ? (
-                          <span className="text-xs text-muted-foreground">
-                            已结束
-                          </span>
-                        ) : (
-                          <Button
-                            size="sm"
-                            variant={isExpanded ? "secondary" : "outline"}
-                            onClick={() =>
-                              setExpandedId(isExpanded ? null : r.id)
-                            }
-                          >
-                            {isExpanded ? "收起" : "展开"}
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                    {isExpanded && !locked && (
-                      <TableRow className="hover:bg-transparent">
-                        <TableCell colSpan={10} className="bg-muted/30 p-4">
-                          <InstructionForm
-                            draft={getDraft(r.id)}
-                            maxQty={remaining}
-                            refPrice={
-                              r.entry_price_ref !== null
-                                ? Number(r.entry_price_ref)
-                                : null
-                            }
-                            disabled={isRowSubmitting}
-                            onChange={(patch) => setDraft(r.id, patch)}
-                            onSubmit={() => handleRowSubmit(r.id)}
-                            onVeto={() => {
-                              setVetoTarget(r.id)
-                              setVetoReason("")
-                              setVetoErr(false)
-                            }}
-                            onSkip={() => handleSkip(r.id)}
-                          />
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </Fragment>
-                )
-              })}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
-      {/* 否决 Dialog */}
-      <Dialog
-        open={vetoTarget !== null}
-        onOpenChange={(o) => {
-          if (!o) {
+      {/* 否决 Dialog — hairline modal */}
+      {vetoTarget !== null && (
+        <VetoDialog
+          reason={vetoReason}
+          hasError={vetoErr}
+          disabled={isPending}
+          onReasonChange={(v) => {
+            setVetoReason(v)
+            if (v.trim()) setVetoErr(false)
+          }}
+          onCancel={() => {
             setVetoTarget(null)
             setVetoReason("")
             setVetoErr(false)
-          }
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>否决指令</DialogTitle>
-            <DialogDescription>
-              否决原因将写入 audit log · 审计不可变，请填写清楚
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2">
-            <Label>否决原因</Label>
-            <Textarea
-              placeholder="示例：盘前公告突发，价格跳空，暂不建仓"
-              value={vetoReason}
-              onChange={(e) => {
-                setVetoReason(e.target.value)
-                if (e.target.value.trim()) setVetoErr(false)
-              }}
-              aria-invalid={vetoErr}
-              className="min-h-24"
-            />
-            {vetoErr && (
-              <p className="text-xs text-red-600">否决原因不能为空</p>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setVetoTarget(null)}>
-              取消
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleVetoSubmit}
-              disabled={isPending}
-            >
-              确认否决
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+          }}
+          onConfirm={handleVetoSubmit}
+        />
+      )}
+    </>
   )
 }
 
-/** 回填表单（展开行内）。 */
-function InstructionForm({
+/** 行内回填表单（展开行）。 */
+function InlineFillForm({
   draft,
   maxQty,
   refPrice,
@@ -454,114 +416,228 @@ function InstructionForm({
   onVeto: () => void
   onSkip: () => void
 }) {
-  const filledEst = Number(draft.filled_qty) * Number(draft.filled_price)
-  const refCost = refPrice ? Number(draft.filled_qty) * refPrice : 0
+  const qty = Number(draft.filled_qty)
+  const price = Number(draft.filled_price)
+  const filledEst = qty * price
+  const refCost = refPrice ? qty * refPrice : 0
   const slip = refCost > 0 ? filledEst - refCost : 0
+  const showSlip = refPrice && qty > 0 && price > 0
+
+  const inputStyle: React.CSSProperties = {
+    padding: "8px 10px",
+    border: "1px solid var(--porcelain-200)",
+    borderRadius: 8,
+    width: "100%",
+    fontSize: 13,
+    background: "var(--card)",
+    fontFamily: "var(--font-mono)",
+  }
 
   return (
-    <div className="grid gap-4 md:grid-cols-[repeat(3,minmax(0,1fr))_auto]">
-      <div className="grid gap-1.5">
-        <Label>成交量 (手)</Label>
-        <Input
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr 1fr auto",
+        gap: 12,
+        alignItems: "end",
+      }}
+    >
+      <label>
+        <div className="eye" style={{ marginBottom: 6 }}>
+          成交量（手）
+        </div>
+        <input
           type="number"
-          inputMode="numeric"
           min={1}
           max={maxQty}
           placeholder={`剩余 ${maxQty}`}
           value={draft.filled_qty}
           onChange={(e) => onChange({ filled_qty: e.target.value })}
           disabled={disabled}
+          style={inputStyle}
         />
-      </div>
-      <div className="grid gap-1.5">
-        <Label>成交价</Label>
-        <Input
+      </label>
+      <label>
+        <div className="eye" style={{ marginBottom: 6 }}>
+          成交价
+        </div>
+        <input
           type="number"
           step="0.01"
           placeholder={refPrice ? String(refPrice) : "价格"}
           value={draft.filled_price}
           onChange={(e) => onChange({ filled_price: e.target.value })}
           disabled={disabled}
+          style={inputStyle}
         />
-      </div>
-      <div className="grid gap-1.5">
-        <Label>触发源</Label>
-        <RadioGroup
-          className="grid grid-cols-2 gap-2 md:flex md:flex-wrap md:gap-3"
-          value={draft.trigger_source}
-          onValueChange={(v) =>
-            onChange({ trigger_source: (v as TriggerSource) ?? "user_manual" })
-          }
-        >
-          {(
-            Object.entries(TRIGGER_SOURCE_LABELS) as [TriggerSource, string][]
-          ).map(([k, label]) => (
-            <label
-              key={k}
-              className="flex items-center gap-2 text-sm cursor-pointer whitespace-nowrap"
-            >
-              <RadioGroupItem value={k} /> {label}
-            </label>
-          ))}
-        </RadioGroup>
-      </div>
-      <div className="flex flex-col gap-2 min-w-40">
-        <Button onClick={onSubmit} disabled={disabled}>
-          {disabled ? "提交中…" : "成交回填"}
-        </Button>
-        <div className="flex gap-2">
-          <Button
-            variant="destructive"
-            className="flex-1"
-            onClick={onVeto}
-            disabled={disabled}
-          >
-            否决
-          </Button>
-          <Button
-            variant="outline"
-            className="flex-1"
-            onClick={onSkip}
-            disabled={disabled}
-          >
-            跳过
-          </Button>
+      </label>
+      <label>
+        <div className="eye" style={{ marginBottom: 6 }}>
+          触发源
         </div>
+        <select
+          value={draft.trigger_source}
+          onChange={(e) => onChange({ trigger_source: e.target.value as TriggerSource })}
+          disabled={disabled}
+          style={inputStyle}
+        >
+          {(Object.entries(TRIGGER_SOURCE_LABELS) as [TriggerSource, string][]).map(
+            ([k, l]) => (
+              <option key={k} value={k}>
+                {l}
+              </option>
+            ),
+          )}
+        </select>
+      </label>
+      <div style={{ display: "flex", gap: 6 }}>
+        <button className="btn prim" onClick={onSubmit} disabled={disabled}>
+          {disabled ? "提交中…" : "成交回填"}
+        </button>
+        <button className="btn dan" onClick={onVeto} disabled={disabled}>
+          否决
+        </button>
+        <button className="btn" onClick={onSkip} disabled={disabled}>
+          跳过
+        </button>
       </div>
-      <div className="md:col-span-4 grid gap-1.5">
-        <Label>备注（可选）</Label>
-        <Textarea
+      <label style={{ gridColumn: "1 / -1" }}>
+        <div className="eye" style={{ marginBottom: 6 }}>
+          备注（可选）
+        </div>
+        <textarea
           placeholder="记录成交细节 / 盘中观察，可选"
           value={draft.note}
           onChange={(e) => onChange({ note: e.target.value })}
-          className="min-h-16"
           disabled={disabled}
+          style={{
+            ...inputStyle,
+            minHeight: 64,
+            resize: "vertical",
+            fontFamily: "var(--font-sans)",
+          }}
         />
-      </div>
-      {refPrice && Number(draft.filled_qty) > 0 && Number(draft.filled_price) > 0 && (
-        <div className="md:col-span-4">
-          <Separator className="my-2" />
-          <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
-            <span>
-              估算成交金额：
-              <span className="font-mono ml-1 text-foreground">
-                {filledEst.toLocaleString("zh-CN", {
-                  maximumFractionDigits: 0,
-                })}
-              </span>
+      </label>
+      {showSlip && (
+        <div
+          style={{
+            gridColumn: "1 / -1",
+            display: "flex",
+            gap: 24,
+            fontSize: 11,
+            color: "var(--graphite-500)",
+            paddingTop: 8,
+            borderTop: "1px solid var(--porcelain-200)",
+          }}
+        >
+          <span>
+            估算成交：
+            <span
+              className="num"
+              style={{ marginLeft: 4, color: "var(--graphite-900)" }}
+            >
+              {fmtY(filledEst)}
             </span>
-            <span>
-              相对参考滑点：
-              <span className={`font-mono ml-1 ${pnlClass(slip)}`}>
-                {slip > 0 ? "+" : ""}
-                {slip.toLocaleString("zh-CN", {
-                  maximumFractionDigits: 0,
-                })}
-              </span>
+          </span>
+          <span>
+            相对参考滑点：
+            <span className={`num ${signCls(slip)}`} style={{ marginLeft: 4 }}>
+              {slip > 0 ? "+" : ""}
+              {Math.round(slip).toLocaleString("zh-CN")}
             </span>
-          </div>
+          </span>
         </div>
       )}
+    </div>
+  )
+}
+
+/** 否决 Dialog —— 朴素 modal，Morandi 调。 */
+function VetoDialog({
+  reason,
+  hasError,
+  disabled,
+  onReasonChange,
+  onCancel,
+  onConfirm,
+}: {
+  reason: string
+  hasError: boolean
+  disabled: boolean
+  onReasonChange: (v: string) => void
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 50,
+        background: "rgba(21, 23, 27, 0.45)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 20,
+      }}
+      onClick={onCancel}
+    >
+      <div
+        className="card-va"
+        style={{ width: 480, maxWidth: "100%", padding: "18px 20px" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="ti" style={{ fontSize: 16, fontWeight: 500 }}>
+          否决指令
+        </div>
+        <div className="de" style={{ marginTop: 4 }}>
+          否决原因将写入 audit log · 审计不可变，请填写清楚
+        </div>
+        <label style={{ display: "block", marginTop: 14 }}>
+          <div className="eye" style={{ marginBottom: 6 }}>
+            否决原因
+          </div>
+          <textarea
+            placeholder="示例：盘前公告突发，价格跳空，暂不建仓"
+            value={reason}
+            onChange={(e) => onReasonChange(e.target.value)}
+            autoFocus
+            style={{
+              width: "100%",
+              minHeight: 96,
+              padding: "10px 12px",
+              border: `1px solid ${hasError ? "var(--pnl-neg)" : "var(--porcelain-200)"}`,
+              borderRadius: 8,
+              fontSize: 13,
+              background: "var(--card)",
+              fontFamily: "var(--font-sans)",
+              resize: "vertical",
+            }}
+          />
+          {hasError && (
+            <p style={{ fontSize: 11, color: "var(--pnl-neg)", marginTop: 4 }}>
+              否决原因不能为空
+            </p>
+          )}
+        </label>
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            justifyContent: "flex-end",
+            marginTop: 16,
+          }}
+        >
+          <button className="btn" onClick={onCancel} disabled={disabled}>
+            取消
+          </button>
+          <button className="btn dan" onClick={onConfirm} disabled={disabled}>
+            确认否决
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

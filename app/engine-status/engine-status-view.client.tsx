@@ -1,64 +1,28 @@
 "use client"
 
 /**
- * app/engine-status/engine-status-view.client.tsx — 引擎状态页
+ * app/engine-status/engine-status-view.client.tsx — 引擎状态（V1 Morandi 设计）
  *
- * 布局：
- *   - 顶部 6 张 Card（Engine 心跳 / 今日信号 / 本周累计 / 最近告警 / 下次触发 / 账户快照）
- *   - 中部折线图（过去 14 天每日指令数）
- *   - 下部表格：8 条 launchd 触发点 + 倒计时
- *   - 底部：最近 10 条告警
- *
- * 刷新：首屏用 RSC props 渲染；每 30 秒 fetch 一次更新，无抖动。
+ * 布局：KPI 5 列（心跳 / 今日信号 / 近 7 天 / 24h 告警 / 下次触发）
+ *      + 14 天指令直方图 + launchd 计划表 + 最近告警。
+ * 每 30s 轮询；倒计时本地每秒刷新。
  */
 import { useCallback, useEffect, useMemo, useState } from "react"
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import { Separator } from "@/components/ui/separator"
-import { SeverityBadge } from "@/components/status-badges"
+import { SevPill } from "@/components/pills"
 import { fetchEngineStatus } from "@/lib/api"
-import { formatCurrency } from "@/lib/mock"
+import { fmtY, toNum } from "@/lib/format"
 import type { EngineStatus, LaunchdSlot } from "@/lib/types"
 
-const REFRESH_MS = 30_000 // 30 秒自动刷新
+const REFRESH_MS = 30_000
 
-// ---------- 格式化工具 ----------
-
-/** "2026-04-20T02:50:00+08:00" → "02:50"。 */
 function fmtHHMM(iso: string): string {
   const d = new Date(iso)
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`
 }
-
-/** "2026-04-20T02:50:00+08:00" → "04-20 02:50"。 */
 function fmtMMDDHHMM(iso: string): string {
   const d = new Date(iso)
   return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`
 }
-
-/** 毫秒数 → "2h 15m"（超过 24h 则显示 "1d 3h"）。 */
 function fmtCountdown(ms: number): string {
   if (ms <= 0) return "即将触发"
   const totalMin = Math.floor(ms / 60_000)
@@ -69,8 +33,6 @@ function fmtCountdown(ms: number): string {
   if (hours > 0) return `${hours}h ${minutes}m`
   return `${minutes}m`
 }
-
-/** ISO → "X 小时前 / X 天前 / 刚刚"。 */
 function fmtRelativePast(iso: string, nowMs: number): string {
   const t = new Date(iso).getTime()
   const diff = nowMs - t
@@ -83,18 +45,10 @@ function fmtRelativePast(iso: string, nowMs: number): string {
   const d = Math.floor(h / 24)
   return `${d} 天前`
 }
-
-/** bytes → 可读（KB / MB）。 */
 function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / (1024 * 1024)).toFixed(2)} MB`
-}
-
-/** Decimal string → number（后端可能给字符串）。 */
-function toNum(v: number | string | null | undefined): number {
-  if (v == null) return 0
-  return typeof v === "number" ? v : Number(v)
 }
 
 export function EngineStatusView({ initial }: { initial: EngineStatus }) {
@@ -103,7 +57,6 @@ export function EngineStatusView({ initial }: { initial: EngineStatus }) {
   const [now, setNow] = useState<number>(Date.now())
   const [pollError, setPollError] = useState<string | null>(null)
 
-  // 30s 轮询更新 status
   const poll = useCallback(async () => {
     try {
       const data = await fetchEngineStatus()
@@ -120,26 +73,18 @@ export function EngineStatusView({ initial }: { initial: EngineStatus }) {
     return () => clearInterval(id)
   }, [poll])
 
-  // 1s 本地时钟，用于倒计时 / "距今多久"（无需再打后端）
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
   }, [])
 
-  // --- 派生数据 ---
-
-  const today = status.instructions_by_date[status.instructions_by_date.length - 1]
+  const today = status.instructions_by_date.at(-1)
   const todayTotal = today?.total ?? 0
   const todayBreakdown = today?.by_status ?? {}
-
   const sevenDayTotal = useMemo(
-    () =>
-      status.instructions_by_date
-        .slice(-7)
-        .reduce((acc, d) => acc + d.total, 0),
+    () => status.instructions_by_date.slice(-7).reduce((a, d) => a + d.total, 0),
     [status.instructions_by_date],
   )
-
   const alertCount = status.alerts_24h_count
   const totalAlerts24h =
     (alertCount?.info ?? 0) + (alertCount?.warn ?? 0) + (alertCount?.critical ?? 0)
@@ -149,317 +94,322 @@ export function EngineStatusView({ initial }: { initial: EngineStatus }) {
     status.launchd_schedule[0] ??
     null
 
+  const state = status.latest_state
+  const capital = status.capital_snapshot
+  const recentAlerts = status.recent_alerts
+  const schedule = status.launchd_schedule
+
+  // 14 天直方图数据
   const chartData = useMemo(
     () =>
-      status.instructions_by_date.map((d) => ({
-        date: d.date.slice(5), // MM-DD
+      status.instructions_by_date.slice(-14).map((d) => ({
+        date: d.date.slice(5),
         total: d.total,
       })),
     [status.instructions_by_date],
   )
-
-  const state = status.latest_state
-  const capital = status.capital_snapshot
-
-  // 最近告警（后端已给最多 10 条）
-  const recentAlerts = status.recent_alerts
-
-  // 标签行 —— 倒计时 8-10 条全部展示（后端已按时间排序）
-  const schedule = status.launchd_schedule
+  const maxCount = Math.max(1, ...chartData.map((d) => d.total))
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-end justify-between gap-4">
+    <>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-end",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">引擎状态</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            实时引擎心跳 · launchd 下次触发 · 14 天信号量 · 最近告警
-          </p>
+          <h1 className="page">引擎状态</h1>
+          <div className="sub">
+            实时心跳 · launchd 下次触发 · 14 天信号量 · 最近告警
+          </div>
         </div>
-        <div className="text-xs text-muted-foreground text-right shrink-0">
+        <div
+          style={{
+            fontSize: 11,
+            color: "var(--graphite-500)",
+            textAlign: "right",
+            fontFamily: "var(--font-mono)",
+          }}
+        >
           <div>
             服务器时间 {fmtMMDDHHMM(status.server_time)}（{status.server_timezone}）
           </div>
           <div>
             {pollError ? (
-              <span className="text-red-500">轮询失败：{pollError}</span>
+              <span style={{ color: "var(--pnl-neg)" }}>轮询失败：{pollError}</span>
             ) : (
-              <>上次刷新 {fmtRelativePast(new Date(refreshedAt).toISOString(), now)} · 每 30 秒自动刷新</>
+              <>
+                上次刷新 {fmtRelativePast(new Date(refreshedAt).toISOString(), now)} · 每
+                30 秒自动刷新
+              </>
             )}
           </div>
         </div>
       </div>
 
-      {/* 顶部 6 张 Card */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6 gap-4">
-        {/* Card 1: Engine 心跳 */}
-        <Card>
-          <CardHeader>
-            <CardDescription>引擎心跳</CardDescription>
-            <CardTitle className="text-lg font-semibold">
-              {state
-                ? `${state.session_date} ${state.session === "day" ? "日盘" : "夜盘"}`
-                : "无快照"}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1">
+      <div className="kpis" style={{ gridTemplateColumns: "repeat(5, 1fr)" }}>
+        <div className="kpi">
+          <div className="l">引擎心跳</div>
+          <div className="v" style={{ fontSize: 15 }}>
+            {state
+              ? `${state.session_date} · ${state.session === "day" ? "日盘" : "夜盘"}`
+              : "无快照"}
+          </div>
+          <div className="m">
             {state ? (
               <>
-                <p className="text-xs text-muted-foreground">
-                  state.last_date = <b>{state.state_last_date ?? "N/A"}</b>
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  持仓 {state.state_positions_count} 只 · state{" "}
-                  {fmtBytes(state.state_bytes)}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  写入于 {fmtRelativePast(state.created_at, now)}
-                </p>
+                持仓 {state.state_positions_count} · state{" "}
+                {fmtBytes(state.state_bytes)} · 写入于{" "}
+                <span className="pos">{fmtRelativePast(state.created_at, now)}</span>
               </>
             ) : (
-              <p className="text-xs text-muted-foreground">
-                engine_states 表为空（引擎尚未首次 warmup）
-              </p>
+              "engine_states 表为空"
             )}
-          </CardContent>
-        </Card>
-
-        {/* Card 2: 今日信号 */}
-        <Card>
-          <CardHeader>
-            <CardDescription>今日信号</CardDescription>
-            <CardTitle className="text-2xl font-bold">{todayTotal}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {todayTotal === 0 ? (
-              <p className="text-xs text-muted-foreground">今日暂无指令</p>
-            ) : (
-              <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                {Object.entries(todayBreakdown).map(([k, v]) => (
-                  <span key={k}>
-                    {k}: <b className="text-foreground">{v}</b>
-                  </span>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Card 3: 本周累计 */}
-        <Card>
-          <CardHeader>
-            <CardDescription>近 7 天累计</CardDescription>
-            <CardTitle className="text-2xl font-bold">{sevenDayTotal}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-xs text-muted-foreground">过去 7 个交易日指令总数</p>
-          </CardContent>
-        </Card>
-
-        {/* Card 4: 最近告警 24h */}
-        <Card>
-          <CardHeader>
-            <CardDescription>24 小时告警</CardDescription>
-            <CardTitle className="text-2xl font-bold">{totalAlerts24h}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex gap-3 text-xs">
-              <span className="text-blue-600 dark:text-blue-300">
-                info <b>{alertCount.info}</b>
-              </span>
-              <span className="text-yellow-600 dark:text-yellow-300">
-                warn <b>{alertCount.warn}</b>
-              </span>
-              <span className="text-red-600 dark:text-red-300">
-                critical <b>{alertCount.critical}</b>
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Card 5: 下次触发倒计时 */}
-        <Card>
-          <CardHeader>
-            <CardDescription>下次触发</CardDescription>
-            <CardTitle className="text-2xl font-bold">
-              {nextSlot
-                ? fmtCountdown(new Date(nextSlot.next_fire).getTime() - now)
-                : "无"}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {nextSlot ? (
-              <p className="text-xs text-muted-foreground">
-                {nextSlot.description}
-                <br />
-                {fmtMMDDHHMM(nextSlot.next_fire)}
-              </p>
-            ) : (
-              <p className="text-xs text-muted-foreground">无 launchd 计划</p>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Card 6: 账户快照 */}
-        <Card>
-          <CardHeader>
-            <CardDescription>账户快照</CardDescription>
-            <CardTitle className="text-lg font-semibold">
-              {capital ? formatCurrency(toNum(capital.equity)) : "暂无日结"}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {capital ? (
-              <>
-                <p className="text-xs text-muted-foreground">
-                  现金 {formatCurrency(toNum(capital.cash))} · 持仓市值{" "}
-                  {formatCurrency(toNum(capital.open_positions_mv))}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  回撤{" "}
-                  {(toNum(capital.drawdown_from_peak) * 100).toFixed(2)}% ·{" "}
-                  {capital.date}
-                </p>
-              </>
-            ) : (
-              <p className="text-xs text-muted-foreground">daily_pnl 表无数据</p>
-            )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
+        <div className="kpi">
+          <div className="l">今日信号</div>
+          <div className="v">{todayTotal}</div>
+          <div className="m">
+            {todayTotal === 0
+              ? "今日暂无指令"
+              : Object.entries(todayBreakdown)
+                  .map(([k, v]) => `${k} ${v}`)
+                  .join(" · ")}
+          </div>
+        </div>
+        <div className="kpi">
+          <div className="l">近 7 天累计</div>
+          <div className="v">{sevenDayTotal}</div>
+          <div className="m">过去 7 个交易日</div>
+        </div>
+        <div className="kpi">
+          <div className="l">24h 告警</div>
+          <div className="v">{totalAlerts24h}</div>
+          <div className="m">
+            info {alertCount.info} · warn {alertCount.warn} · crit {alertCount.critical}
+          </div>
+        </div>
+        <div className="kpi">
+          <div className="l">下次触发</div>
+          <div className="v" style={{ fontSize: 18 }}>
+            {nextSlot ? fmtCountdown(new Date(nextSlot.next_fire).getTime() - now) : "无"}
+          </div>
+          <div className="m">
+            {nextSlot
+              ? `${nextSlot.description} · ${fmtMMDDHHMM(nextSlot.next_fire)}`
+              : "无 launchd 计划"}
+          </div>
+        </div>
       </div>
 
-      {/* 中部：折线图（14 天每日指令数） */}
-      <Card>
-        <CardHeader>
-          <CardTitle>近 14 天指令数</CardTitle>
-          <CardDescription>
-            每天由 signal_service 日 / 夜盘两次触发产出
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="h-60 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="currentColor"
-                  opacity={0.1}
-                />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fontSize: 11 }}
-                  stroke="currentColor"
-                  opacity={0.5}
-                />
-                <YAxis
-                  tick={{ fontSize: 11 }}
-                  stroke="currentColor"
-                  opacity={0.5}
-                  allowDecimals={false}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: "var(--popover)",
-                    border: "1px solid var(--border)",
-                    borderRadius: 8,
-                    fontSize: 12,
-                  }}
-                  labelFormatter={(l) => `日期 ${l}`}
-                  formatter={(v) => [v, "指令数"]}
-                />
-                <Bar dataKey="total" fill="#2563eb" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+      {/* 账户快照 —— 次要卡片 */}
+      {capital && (
+        <div className="card-va" style={{ marginTop: 16 }}>
+          <div className="hd">
+            <div className="ti">账户快照 · {capital.date}</div>
+            <div className="de">
+              权益 <b>{fmtY(toNum(capital.equity) ?? 0)}</b> · 现金{" "}
+              {fmtY(toNum(capital.cash) ?? 0)} · 持仓市值{" "}
+              {fmtY(toNum(capital.open_positions_mv) ?? 0)} · 回撤{" "}
+              <span className="neg">
+                {((toNum(capital.drawdown_from_peak) ?? 0) * 100).toFixed(2)}%
+              </span>
+            </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      )}
 
-      {/* launchd 触发表 */}
-      <Card>
-        <CardHeader>
-          <CardTitle>launchd 触发计划</CardTitle>
-          <CardDescription>
-            共 {schedule.length} 个时点 · 从 live/scheduler/*.plist 解析
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Label</TableHead>
-                <TableHead>说明</TableHead>
-                <TableHead>触发时刻</TableHead>
-                <TableHead>下次触发</TableHead>
-                <TableHead className="text-right">倒计时</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {schedule.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                    无 launchd 计划
-                  </TableCell>
-                </TableRow>
-              )}
-              {schedule.map((slot, idx) => {
-                const ms = new Date(slot.next_fire).getTime() - now
-                const isNext = idx === 0 // 后端按 next_fire 升序
+      {/* 14 天指令直方图 */}
+      <div className="card-va" style={{ marginTop: 16 }}>
+        <div className="hd">
+          <div className="ti">近 14 天指令数</div>
+          <div className="de">信号产出节奏 · 日盘 + 夜盘合计</div>
+        </div>
+        <div className="bd" style={{ height: 150, padding: "0 16px 8px" }}>
+          {chartData.length === 0 ? (
+            <div
+              style={{
+                padding: 16,
+                color: "var(--graphite-500)",
+                fontSize: 12,
+              }}
+            >
+              无指令产出记录
+            </div>
+          ) : (
+            <svg className="chart-surface" viewBox="0 0 780 130" preserveAspectRatio="none">
+              {chartData.map((d, i) => {
+                const bw = (780 / chartData.length) * 0.58
+                const x = (i + 0.5) * (780 / chartData.length) - bw / 2
+                const h = (d.total / maxCount) * 100
                 return (
-                  <TableRow
-                    key={`${slot.label}-${slot.hour}-${slot.minute}`}
-                    className={isNext ? "bg-muted/30" : ""}
-                  >
-                    <TableCell className="font-mono text-xs">
-                      {slot.label.replace(/^com\.stockfuture\./, "")}
-                    </TableCell>
-                    <TableCell>{slot.description}</TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {fmtHHMM(slot.next_fire)}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {fmtMMDDHHMM(slot.next_fire)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-xs">
-                      {fmtCountdown(ms)}
-                    </TableCell>
-                  </TableRow>
+                  <g key={i}>
+                    <rect
+                      className="chart-bar"
+                      x={x}
+                      y={108 - h}
+                      width={bw}
+                      height={h}
+                      fill="var(--mist)"
+                      rx="2"
+                    />
+                    <text className="chart-axis" x={x + bw / 2} y={124} textAnchor="middle">
+                      {d.date}
+                    </text>
+                  </g>
                 )
               })}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+            </svg>
+          )}
+        </div>
+      </div>
+
+      {/* launchd 计划 */}
+      <div className="card-va" style={{ marginTop: 16 }}>
+        <div className="hd">
+          <div className="ti">launchd 触发计划</div>
+          <div className="de">
+            共 {schedule.length} 个时点 · 从 live/scheduler/*.plist 解析
+          </div>
+        </div>
+        <div className="bd" style={{ padding: 0 }}>
+          <div style={{ overflowX: "auto" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th style={{ paddingLeft: 16 }}>Label</th>
+                  <th>说明</th>
+                  <th className="ta-r">触发时刻</th>
+                  <th className="ta-r">下次触发</th>
+                  <th className="ta-r" style={{ paddingRight: 16 }}>
+                    倒计时
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {schedule.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      style={{
+                        textAlign: "center",
+                        color: "var(--graphite-500)",
+                        padding: "32px 12px",
+                      }}
+                    >
+                      无 launchd 计划
+                    </td>
+                  </tr>
+                )}
+                {schedule.map((slot, idx) => {
+                  const ms = new Date(slot.next_fire).getTime() - now
+                  const isNext = idx === 0
+                  return (
+                    <tr
+                      key={`${slot.label}-${slot.hour}-${slot.minute}`}
+                      style={
+                        isNext ? { background: "var(--porcelain-50)" } : undefined
+                      }
+                    >
+                      <td
+                        className="num"
+                        style={{ paddingLeft: 16, fontSize: 11 }}
+                      >
+                        {slot.label.replace(/^com\.stockfuture\./, "")}
+                      </td>
+                      <td>{slot.description}</td>
+                      <td className="ta-r num">{fmtHHMM(slot.next_fire)}</td>
+                      <td className="ta-r num flat">{fmtMMDDHHMM(slot.next_fire)}</td>
+                      <td
+                        className="ta-r num"
+                        style={{
+                          paddingRight: 16,
+                          fontWeight: isNext ? 500 : 400,
+                        }}
+                      >
+                        {fmtCountdown(ms)}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
 
       {/* 最近告警 */}
-      <Card>
-        <CardHeader>
-          <CardTitle>最近告警</CardTitle>
-          <CardDescription>最近 10 条 alerts 表事件</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
+      <div className="card-va" style={{ marginTop: 16 }}>
+        <div className="hd">
+          <div className="ti">最近告警</div>
+          <div className="de">最近 {recentAlerts.length} 条事件</div>
+        </div>
+        <div
+          className="bd"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+            padding: "4px 16px 16px",
+          }}
+        >
           {recentAlerts.length === 0 && (
-            <p className="text-xs text-muted-foreground">暂无告警</p>
+            <p
+              style={{
+                fontSize: 12,
+                color: "var(--graphite-500)",
+                margin: 0,
+                padding: "8px 0",
+              }}
+            >
+              暂无告警
+            </p>
           )}
           {recentAlerts.map((a, i) => (
-            <div key={a.id}>
-              <div className="flex items-start gap-2">
-                <SeverityBadge severity={a.severity} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm leading-snug">{a.message}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {fmtMMDDHHMM(a.event_at)} · {a.event_type}
-                  </p>
+            <div
+              key={a.id}
+              style={{
+                display: "flex",
+                gap: 8,
+                paddingTop: 10,
+                borderTop: i ? "1px solid var(--porcelain-100)" : "none",
+              }}
+            >
+              <SevPill sev={a.severity} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, lineHeight: 1.4 }}>{a.message}</div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "var(--graphite-500)",
+                    marginTop: 3,
+                    fontFamily: "var(--font-mono)",
+                  }}
+                >
+                  {fmtMMDDHHMM(a.event_at)} · {a.event_type}
                 </div>
               </div>
-              {i < recentAlerts.length - 1 && <Separator className="mt-3" />}
             </div>
           ))}
-        </CardContent>
-      </Card>
-
-      <div className="text-xs text-muted-foreground pt-2">
-        DB 健康：<b className={status.db_health === "ok" ? "text-green-600" : "text-red-600"}>{status.db_health}</b>
+        </div>
       </div>
-    </div>
+
+      <div
+        style={{
+          fontSize: 11,
+          color: "var(--graphite-500)",
+          paddingTop: 12,
+          fontFamily: "var(--font-mono)",
+        }}
+      >
+        DB 健康：
+        <b className={status.db_health === "ok" ? "pos" : "neg"}>{status.db_health}</b>
+      </div>
+    </>
   )
 }

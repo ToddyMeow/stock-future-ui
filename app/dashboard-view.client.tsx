@@ -1,37 +1,33 @@
 "use client"
 
 /**
- * app/dashboard-view.client.tsx — 仪表盘纯展示组件
+ * app/dashboard-view.client.tsx — 仪表盘（V1 Morandi 设计）
  *
- * 从 RSC 父拿 props，使用 recharts 必须 client。
+ * 从 RSC 父拿 props（pnlSeries / instructions / alerts / rolls）。
+ * LineChart 是自绘 SVG（tooltip 带 hover 游标），client 即可。
  */
 import Link from "next/link"
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Separator } from "@/components/ui/separator"
-import { pnlClass, SeverityBadge } from "@/components/status-badges"
-import {
-  formatCurrency,
-  formatPct,
-  formatTime,
-} from "@/lib/mock"
-import type { Alert, DailyPnl, Instruction, RollCandidate } from "@/lib/types"
+import { LineChart } from "@/components/charts/line-chart"
+import { SevPill } from "@/components/pills"
+import { fmtPct, fmtY, signCls, shortTime } from "@/lib/format"
+import type {
+  Alert,
+  DailyPnl,
+  Instruction,
+  RollCandidate,
+} from "@/lib/types"
+
+function nowLine() {
+  const d = new Date()
+  const weekday = ["日", "一", "二", "三", "四", "五", "六"][d.getDay()]
+  const iso = d.toISOString().slice(0, 10)
+  const t = `${String(d.getHours()).padStart(2, "0")}:${String(
+    d.getMinutes(),
+  ).padStart(2, "0")}`
+  const hour = d.getHours()
+  const session = hour < 8 || hour >= 15 ? "夜盘准备中" : "日盘进行中"
+  return `${iso} · 星期${weekday} · ${session} ${t} CST`
+}
 
 export function DashboardView({
   pnlSeries,
@@ -44,255 +40,249 @@ export function DashboardView({
   alerts: Alert[]
   rolls?: RollCandidate[]
 }) {
-  // 边界：空序列占位（极少概率——后端新账户第一天）
   if (pnlSeries.length === 0) {
     return (
-      <div className="p-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>暂无权益数据</CardTitle>
-            <CardDescription>
-              account_state.daily_pnl 为空 — 请先运行首次日结
-            </CardDescription>
-          </CardHeader>
-        </Card>
+      <div style={{ padding: 24 }}>
+        <h1 className="page">仪表盘</h1>
+        <div className="sub">{nowLine()}</div>
+        <div className="card-va" style={{ marginTop: 24 }}>
+          <div className="hd">
+            <div className="ti">暂无权益数据</div>
+            <div className="de">daily_pnl 为空 — 请先运行首次日结</div>
+          </div>
+        </div>
       </div>
     )
   }
 
-  const latest = pnlSeries[pnlSeries.length - 1]
-  const prev = pnlSeries[pnlSeries.length - 2] ?? latest
+  const latest = pnlSeries.at(-1)!
+  const prev = pnlSeries.at(-2) ?? latest
   const first = pnlSeries[0]
   const pnlToday = latest.equity - prev.equity
-  const pnlCumulative = latest.equity - first.equity
-  const cumPct = first.equity > 0 ? pnlCumulative / first.equity : 0
-  const maxDD = Math.min(
-    ...pnlSeries.map((d) => d.drawdown_from_peak ?? 0),
-  )
+  const cum = latest.equity - first.equity
+  const maxDD = Math.min(...pnlSeries.map((d) => d.drawdown_from_peak ?? 0))
 
   const pendingCount = instructions.filter(
     (i) => i.status === "pending" || i.status === "partially_filled",
   ).length
 
-  const topAlerts = alerts.slice(0, 3)
+  const topAlerts = alerts.slice(0, 5)
 
   const chartData = pnlSeries.map((d) => ({
-    date: d.date.slice(5), // MM-DD
+    date: d.date,
     equity: d.equity,
   }))
 
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">仪表盘</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          账户权益 · 核心 KPI · 今日待办 · 最近告警
-        </p>
-      </div>
-
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
-        <Card>
-          <CardHeader>
-            <CardDescription>今日盈亏</CardDescription>
-            <CardTitle
-              className={`text-2xl font-bold ${pnlClass(pnlToday)}`}
-            >
-              {formatCurrency(pnlToday, true)}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-xs text-muted-foreground">
-              相对昨日结算{" "}
-              {formatPct(prev.equity > 0 ? pnlToday / prev.equity : 0, 2)}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>累计盈亏</CardDescription>
-            <CardTitle
-              className={`text-2xl font-bold ${pnlClass(pnlCumulative)}`}
-            >
-              {formatCurrency(pnlCumulative, true)}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-xs text-muted-foreground">
-              起始资金 {formatCurrency(first.equity)} · 收益率{" "}
-              <span className={pnlClass(cumPct)}>{formatPct(cumPct, 1)}</span>
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>Sharpe Ratio (90d)</CardDescription>
-            <CardTitle className="text-2xl font-bold text-muted-foreground">
-              —
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-xs text-muted-foreground">
-              实盘样本不足 90 日，暂不计算
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>最大回撤</CardDescription>
-            <CardTitle className="text-2xl font-bold text-red-600">
-              {formatPct(maxDD, 2)}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-xs text-muted-foreground">
-              soft_stop 一期已关闭（Q3）
-            </p>
-          </CardContent>
-        </Card>
-        {/* Q6：待换约 KPI 卡 — 数字 > 0 时红色，点击跳 /positions */}
-        <Link href="/positions" className="block">
-          <Card
-            className={
-              rolls.length > 0
-                ? "border-destructive transition-colors hover:bg-muted/40 cursor-pointer"
-                : "transition-colors hover:bg-muted/40 cursor-pointer"
-            }
+    <>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <h1 className="page">仪表盘</h1>
+          <div className="sub">{nowLine()}</div>
+        </div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <span className="pill filled">
+            <span className="dot" />
+            引擎运行中
+          </span>
+          <button
+            className="btn"
+            onClick={() => {
+              if (typeof window !== "undefined") window.location.reload()
+            }}
           >
-            <CardHeader>
-              <CardDescription>待换约</CardDescription>
-              <CardTitle
-                className={`text-2xl font-bold ${
-                  rolls.length > 0 ? "text-red-600" : ""
-                }`}
-              >
-                {rolls.length} 条
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-xs text-muted-foreground">
-                {rolls.length > 0
-                  ? `${rolls.map((r) => r.symbol).slice(0, 3).join(" / ")}${
-                      rolls.length > 3 ? " ..." : ""
-                    } · 点击查看`
-                  : "持仓全部对齐最新主力合约"}
-              </p>
-            </CardContent>
-          </Card>
-        </Link>
-      </div>
-
-      {/* 权益曲线 + 侧栏 */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <Card className="xl:col-span-2">
-          <CardHeader>
-            <CardTitle>账户权益 · 近 90 日</CardTitle>
-            <CardDescription>
-              起始 {formatCurrency(first.equity)} → 最新{" "}
-              <span className={pnlClass(pnlCumulative)}>
-                {formatCurrency(latest.equity)}
-              </span>
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-72 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart
-                  data={chartData}
-                  margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
-                >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="currentColor"
-                    opacity={0.1}
-                  />
-                  <XAxis
-                    dataKey="date"
-                    tick={{ fontSize: 11 }}
-                    interval={8}
-                    stroke="currentColor"
-                    opacity={0.5}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 11 }}
-                    stroke="currentColor"
-                    opacity={0.5}
-                    tickFormatter={(v) =>
-                      `${(v / 10000).toFixed(0)}万`
-                    }
-                    domain={["dataMin - 20000", "dataMax + 20000"]}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      background: "var(--popover)",
-                      border: "1px solid var(--border)",
-                      borderRadius: 8,
-                      fontSize: 12,
-                    }}
-                    formatter={(v) => [formatCurrency(Number(v ?? 0)), "权益"]}
-                    labelFormatter={(l) => `日期 ${l}`}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="equity"
-                    stroke="#16a34a"
-                    strokeWidth={2}
-                    dot={false}
-                    activeDot={{ r: 5 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="flex flex-col gap-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center justify-between">
-                <span>待回填指令</span>
-                {pendingCount > 0 && (
-                  <Badge className="bg-red-600 text-white">
-                    {pendingCount}
-                  </Badge>
-                )}
-              </CardTitle>
-              <CardDescription>未完成的指令等待操作</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Link href="/instructions">
-                <Button className="w-full">前往今日指令</Button>
-              </Link>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>最近告警</CardTitle>
-              <CardDescription>当日系统事件</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              {topAlerts.length === 0 && (
-                <p className="text-xs text-muted-foreground">暂无告警</p>
-              )}
-              {topAlerts.map((a, i) => (
-                <div key={a.id}>
-                  <div className="flex items-start gap-2">
-                    <SeverityBadge severity={a.severity} />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm leading-snug">{a.message}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {formatTime(a.event_at)} · {a.event_type}
-                      </p>
-                    </div>
-                  </div>
-                  {i < topAlerts.length - 1 && <Separator className="mt-3" />}
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+            刷新
+          </button>
         </div>
       </div>
-    </div>
+
+      {/* KPI Grid —— 4 列（含 Q6 待换约时转 5 列） */}
+      <div
+        className="kpis"
+        style={{
+          gridTemplateColumns: rolls.length > 0 ? "repeat(5, 1fr)" : undefined,
+        }}
+      >
+        <div className="kpi">
+          <div className="l">今日盈亏</div>
+          <div className={`v ${signCls(pnlToday)}`}>{fmtY(pnlToday, true)}</div>
+          <div className="m">
+            较昨日结算{" "}
+            <span className={signCls(pnlToday)}>
+              {fmtPct(prev.equity > 0 ? pnlToday / prev.equity : 0, 2)}
+            </span>
+          </div>
+        </div>
+        <div className="kpi">
+          <div className="l">累计盈亏</div>
+          <div className={`v ${signCls(cum)}`}>{fmtY(cum, true)}</div>
+          <div className="m">
+            起始 {fmtY(first.equity)} ·{" "}
+            <span className={signCls(cum)}>
+              {fmtPct(first.equity > 0 ? cum / first.equity : 0, 1)}
+            </span>
+          </div>
+        </div>
+        <div className="kpi">
+          <div className="l">最大回撤</div>
+          <div className="v neg">{fmtPct(maxDD, 2)}</div>
+          <div className="m">soft_stop 未触发 · cap −12%</div>
+        </div>
+        <div className="kpi">
+          <div className="l">待回填</div>
+          <div className="v">
+            <span>{pendingCount}</span>
+            <span
+              style={{
+                fontSize: 14,
+                color: "var(--graphite-500)",
+                marginLeft: 6,
+              }}
+            >
+              条
+            </span>
+          </div>
+          <div className="m">
+            <Link
+              href="/instructions"
+              style={{ color: "var(--graphite-700)" }}
+            >
+              → 前往回填
+            </Link>
+          </div>
+        </div>
+        {rolls.length > 0 && (
+          <Link
+            href="/positions"
+            className="kpi"
+            style={{
+              textDecoration: "none",
+              borderColor: "var(--pnl-neg-soft)",
+            }}
+          >
+            <div className="l">待换约</div>
+            <div className="v neg">
+              <span>{rolls.length}</span>
+              <span
+                style={{
+                  fontSize: 14,
+                  color: "var(--graphite-500)",
+                  marginLeft: 6,
+                }}
+              >
+                条
+              </span>
+            </div>
+            <div className="m">
+              {rolls
+                .map((r) => r.symbol)
+                .slice(0, 3)
+                .join(" / ")}
+              {rolls.length > 3 ? " …" : ""} · 点击查看
+            </div>
+          </Link>
+        )}
+      </div>
+
+      <div className="grid-3">
+        <div className="card-va">
+          <div
+            className="hd"
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <div>
+              <div className="ti">账户权益 · 近 {pnlSeries.length} 日</div>
+              <div className="de">
+                起始 {fmtY(first.equity)} → 最新{" "}
+                <span
+                  className={signCls(cum)}
+                  style={{ fontWeight: 500 }}
+                >
+                  {fmtY(latest.equity)}
+                </span>
+              </div>
+            </div>
+            <span className="eye">{pnlSeries.length}D</span>
+          </div>
+          <div
+            className="bd"
+            style={{ height: 260, padding: "0 8px 8px" }}
+          >
+            <LineChart data={chartData} w={760} h={250} stroke="var(--mist-deep)" />
+          </div>
+        </div>
+
+        <div className="card-va">
+          <div className="hd">
+            <div className="ti">最近告警</div>
+            <div className="de">当日系统事件 · {alerts.length} 条</div>
+          </div>
+          <div
+            className="bd"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+              padding: "0 14px 14px",
+            }}
+          >
+            {topAlerts.length === 0 && (
+              <p
+                style={{
+                  fontSize: 12,
+                  color: "var(--graphite-500)",
+                  margin: 0,
+                  padding: "8px 0",
+                }}
+              >
+                暂无告警
+              </p>
+            )}
+            {topAlerts.map((a, i) => (
+              <div
+                key={a.id}
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  paddingTop: 10,
+                  borderTop: i
+                    ? "1px solid var(--porcelain-100)"
+                    : "none",
+                }}
+              >
+                <SevPill sev={a.severity} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, lineHeight: 1.4 }}>
+                    {a.message}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "var(--graphite-500)",
+                      marginTop: 3,
+                      fontFamily: "var(--font-mono)",
+                    }}
+                  >
+                    {shortTime(a.event_at)} · {a.event_type}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </>
   )
 }

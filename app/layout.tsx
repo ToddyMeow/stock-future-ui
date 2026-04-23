@@ -1,30 +1,19 @@
-import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import "./globals.css";
-import { Sidebar } from "@/components/sidebar";
-import { MobileNav } from "@/components/mobile-nav";
-import { Toaster } from "@/components/ui/sonner";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+import type { Metadata, Viewport } from "next"
+import "./globals.css"
+import { ShellWrapper } from "@/components/shell-wrapper"
+import { MobileNav } from "@/components/mobile-nav"
+import { Toaster } from "@/components/ui/sonner"
 
 export const metadata: Metadata = {
-  title: "期货实盘控制台",
+  title: "Velvet Anchor · 期货交易控制台",
   description: "中国期货半自动实盘交易系统 — 指令回填 / 持仓 / 分析",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
-    title: "期货实盘",
+    title: "Velvet Anchor",
     statusBarStyle: "black-translucent",
   },
-};
+}
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -32,31 +21,21 @@ export const viewport: Viewport = {
   maximumScale: 1,
   viewportFit: "cover",
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+    { media: "(prefers-color-scheme: light)", color: "#F4F5F7" },
+    { media: "(prefers-color-scheme: dark)", color: "#15171B" },
   ],
-};
+}
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+}: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html
-      lang="zh-CN"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
+    <html lang="zh-CN" className="h-full">
       <body className="min-h-full">
-        <div className="flex min-h-screen flex-col md:flex-row">
-          <Sidebar />
-          <main className="flex-1 min-w-0 pt-[env(safe-area-inset-top)] pb-24 md:pt-0 md:pb-0">
-            {children}
-          </main>
-        </div>
+        <ShellWrapper>{children}</ShellWrapper>
         <MobileNav />
         <Toaster position="top-center" richColors />
       </body>
     </html>
-  );
+  )
 }
